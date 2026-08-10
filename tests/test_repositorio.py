@@ -415,3 +415,71 @@ def test_foreign_key_de_clip_e_aplicada(conn):
             "INSERT INTO clips (fila_clip_id, inicio_s, fim_s, score_claude,"
             " score_final) VALUES (12345, 0, 30, 8, 8)"
         )
+
+
+# --- custos e renders ---------------------------------------------------------
+
+def test_custo_acumulado_comeca_zerado(conn):
+    assert repositorio.custo_acumulado(conn) == 0.0
+
+
+def test_custos_somam_e_filtram_por_servico(conn):
+    repositorio.registrar_custo(conn, "openai:whisper-1", 0.36, quantidade=60,
+                               unidade="minuto")
+    repositorio.registrar_custo(conn, "openai:whisper-1", 0.12)
+    repositorio.registrar_custo(conn, "anthropic:opus", 0.25)
+
+    assert repositorio.custo_acumulado(conn) == pytest.approx(0.73)
+    assert repositorio.custo_acumulado(conn, "openai:whisper-1") == pytest.approx(0.48)
+    assert repositorio.custo_acumulado(conn, "nada") == 0.0
+
+
+def test_custo_guarda_o_consumo_alem_do_valor(conn):
+    # O preço unitário muda; o consumo não. Guardar os dois permite reconferir
+    # o gasto contra a tabela de preços vigente depois.
+    repositorio.registrar_custo(
+        conn, "openai:whisper-1", 0.36, referencia="vid1",
+        quantidade=60.0, unidade="minuto",
+    )
+    linha = conn.execute("SELECT * FROM custos").fetchone()
+    assert linha["quantidade"] == 60.0
+    assert linha["unidade"] == "minuto"
+    assert linha["referencia"] == "vid1"
+
+
+def test_render_ausente_e_none(conn, clip_id):
+    repositorio.registrar_clips(conn, clip_id, [_clip()])
+    id_do_clip = repositorio.clips_do_video(conn, clip_id)[0]["id"]
+    assert repositorio.render(conn, id_do_clip) is None
+
+
+def test_registrar_render_substitui_o_anterior(conn, clip_id):
+    repositorio.registrar_clips(conn, clip_id, [_clip()])
+    id_do_clip = repositorio.clips_do_video(conn, clip_id)[0]["id"]
+
+    repositorio.registrar_render(conn, id_do_clip, "/r/v1.mp4", template_versao="1")
+    repositorio.registrar_render(conn, id_do_clip, "/r/v2.mp4", template_versao="2")
+
+    linha = repositorio.render(conn, id_do_clip)
+    assert linha["caminho"] == "/r/v2.mp4"
+    assert linha["template_versao"] == "2"
+    assert conn.execute("SELECT COUNT(*) FROM renders").fetchone()[0] == 1
+
+
+def test_clips_para_renderizar_traz_as_fontes(conn, clip_id):
+    repositorio.registrar_midia(
+        conn, clip_id, video_path="/v/vid1.mp4", transcricao_path="/t/vid1.json"
+    )
+    repositorio.registrar_clips(conn, clip_id, [_clip()])
+
+    linha = repositorio.clips_para_renderizar(conn)[0]
+    assert linha["video_path"] == "/v/vid1.mp4"
+    assert linha["transcricao_path"] == "/t/vid1.json"
+    assert linha["video_id"] == "vid1"
+
+
+def test_clip_sem_midia_ainda_aparece_na_fila(conn, clip_id):
+    # LEFT JOIN de propósito: quem decide o que fazer com a fonte ausente é o
+    # editar.py, com mensagem. Sumir da fila em silêncio seria pior.
+    repositorio.registrar_clips(conn, clip_id, [_clip()])
+    assert len(repositorio.clips_para_renderizar(conn)) == 1

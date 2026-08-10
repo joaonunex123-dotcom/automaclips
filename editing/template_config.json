@@ -1,0 +1,108 @@
+{
+  "_comentario": [
+    "Template fixo do clip. TODO parâmetro visual mora aqui — nada de fonte,",
+    "cor, posição ou timing cravado no código. Trocar o visual é editar este",
+    "arquivo e renderizar de novo.",
+    "",
+    "`versao` é gravada junto de cada render (tabela `renders`). É o que",
+    "permite saber, na etapa 7, se a diferença de performance entre dois clips",
+    "veio do trecho ou do visual. MUDE a versão sempre que mexer aqui, senão a",
+    "série histórica mistura dois templates sem deixar rastro.",
+    "",
+    "Cores em #RRGGBB ou #RRGGBBAA (AA=FF opaco). Alinhamento segue o teclado",
+    "numérico do ASS: 1-3 embaixo, 4-6 no meio, 7-9 em cima."
+  ],
+
+  "versao": "1",
+
+  "saida": {
+    "largura": 1080,
+    "altura": 1920,
+    "fps": 30,
+    "codec_video": "libx264",
+    "preset": "medium",
+    "crf": 20,
+    "codec_audio": "aac",
+    "bitrate_audio": "192k"
+  },
+
+  "reframe": {
+    "_modo": "corte = recorta 9:16 do original; desfoque = vídeo inteiro sobre fundo borrado",
+    "modo": "corte",
+    "_ancora": "0 = alinha à esquerda, 0.5 = centro, 1 = direita",
+    "ancora_horizontal": 0.5,
+    "desfoque_sigma": 30
+  },
+
+  "zoom": {
+    "_comentario": [
+      "Push-in lento. DESLIGADO por padrão: usa o zoompan do ffmpeg, que é",
+      "conhecido por produzir micro-tremor por arredondamento de pixel, e",
+      "isso não foi verificado num render real ainda. Ligue e olhe o",
+      "resultado antes de deixar ligado em produção."
+    ],
+    "ativo": false,
+    "fator_final": 1.08
+  },
+
+  "legenda": {
+    "ativa": true,
+    "fonte": "Arial",
+    "tamanho": 76,
+    "negrito": true,
+    "cor": "#FFFFFF",
+    "_cor_destaque": "a palavra sendo dita neste instante",
+    "cor_destaque": "#FFD400",
+    "contorno_cor": "#000000",
+    "_contorno": "grosso de propósito: legenda de clip é lida em tela pequena, sobre imagem que muda",
+    "contorno_espessura": 6,
+    "sombra": 2,
+    "margem_vertical": 420,
+    "alinhamento": 2,
+    "_palavras_por_linha": "quantas palavras ficam na tela ao mesmo tempo",
+    "palavras_por_linha": 3,
+    "maiusculas": true
+  },
+
+  "hook": {
+    "_comentario": "Texto de abertura, escolhido pelo LLM junto com o trecho.",
+    "ativo": true,
+    "duracao_s": 1.0,
+    "fonte": "Arial",
+    "tamanho": 96,
+    "negrito": true,
+    "cor": "#FFFFFF",
+    "contorno_cor": "#000000",
+    "contorno_espessura": 8,
+    "sombra": 2,
+    "margem_vertical": 40,
+    "alinhamento": 5,
+    "maiusculas": true
+  },
+
+  "watermark": {
+    "ativo": false,
+    "texto": "@seucanal",
+    "fonte": "Arial",
+    "tamanho": 40,
+    "negrito": false,
+    "cor": "#FFFFFFB0",
+    "contorno_cor": "#00000080",
+    "contorno_espessura": 2,
+    "sombra": 0,
+    "margem_vertical": 60,
+    "alinhamento": 8
+  },
+
+  "sfx": {
+    "_comentario": [
+      "Etapa 4. As chaves existem desde já para o timing dos efeitos nascer",
+      "em configuração, e não cravado no código de edição."
+    ],
+    "ativo": false,
+    "diretorio": "assets/sfx",
+    "whoosh_em_corte": true,
+    "ding_em_pico": true,
+    "volume": 0.6
+  }
+}

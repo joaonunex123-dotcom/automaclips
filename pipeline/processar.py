@@ -25,8 +25,13 @@ from pipeline import energia as energia_mod
 from pipeline import highlight_detect
 from pipeline import select_clips
 from pipeline import transcribe as transcribe_mod
+from pipeline import whisper_api
 
 log = logging.getLogger(__name__)
+
+
+class OrcamentoEsgotado(Exception):
+    """A chamada paga estouraria ORCAMENTO_USD. Recusada antes de gastar."""
 
 # Estados de onde um vídeo ainda tem trabalho pela frente, na ordem do
 # pipeline. 'falha' fica de fora: um vídeo que já quebrou seria retentado a
@@ -79,14 +84,56 @@ def _garantir_midia(conn, linha, baixar):
     return repositorio.midia(conn, linha["id"])
 
 
+def _garantir_orcamento(conn, custo_usd, referencia=""):
+    """Recusa a chamada paga que estouraria o teto, ANTES de fazê-la.
+
+    Conferir depois seria descobrir o saldo vazio já tendo gasto: com um teto
+    pequeno, o modo de falha real é a fila inteira voltar com erro de billing
+    no meio de uma execução noturna. 0 desliga a guarda.
+    """
+    teto = settings.ORCAMENTO_USD
+    if not teto:
+        return
+    gasto = repositorio.custo_acumulado(conn)
+    if gasto + custo_usd > teto:
+        raise OrcamentoEsgotado(
+            f"transcrever {referencia} custaria US$ {custo_usd:.2f} e o acumulado "
+            f"é US$ {gasto:.2f}, acima do teto de US$ {teto:.2f} (ORCAMENTO_USD). "
+            "Use TRANSCRICAO_BACKEND=local ou aumente o teto."
+        )
+
+
 def _garantir_transcricao(conn, linha, midia, transcrever):
     """Passo 2. Reaproveita o .json se já existir."""
     if midia["transcricao_path"]:
         log.info("%s já transcrito.", linha["video_id"])
         return transcribe_mod.carregar(midia["transcricao_path"])
 
-    log.info("Transcrevendo %s...", linha["video_id"])
-    caminho, transcricao = transcrever(midia["audio_path"], linha["video_id"])
+    duracao = midia["duracao_real_s"] or linha["duracao_s"] or 0.0
+
+    # O custo só existe no backend pago, e é estimável antes da chamada porque
+    # a Whisper API cobra por minuto de áudio, não por token.
+    custo = 0.0
+    if transcribe_mod.backend_ativo() == transcribe_mod.BACKEND_OPENAI:
+        custo = whisper_api.estimar_custo(duracao)
+        _garantir_orcamento(conn, custo, linha["video_id"])
+        log.info("Transcrevendo %s pela API (~US$ %.3f, %.0f min)...",
+                 linha["video_id"], custo, duracao / 60.0)
+    else:
+        log.info("Transcrevendo %s localmente...", linha["video_id"])
+
+    caminho, transcricao = transcrever(
+        midia["audio_path"], linha["video_id"], duracao
+    )
+
+    # Registrado DEPOIS do sucesso: chamada que falhou não é cobrada, e
+    # reservar orçamento para ela travaria a fila com alguns erros.
+    if custo:
+        repositorio.registrar_custo(
+            conn, whisper_api.SERVICO, custo, referencia=linha["video_id"],
+            quantidade=duracao / 60.0, unidade="minuto",
+        )
+
     repositorio.registrar_midia(
         conn, linha["id"],
         transcricao_path=caminho,
@@ -178,9 +225,15 @@ def _resumo(conn, contagem):
         f"  analisados  {contagem.get(repositorio.STATUS_ANALISADO, 0)}",
         f"  sem clips   {contagem.get(repositorio.STATUS_SEM_CLIPS, 0)}",
         f"  falhas      {contagem.get(repositorio.STATUS_FALHA, 0)}",
-        "",
-        "--- fila ---",
     ]
+
+    gasto = repositorio.custo_acumulado(conn)
+    if gasto or settings.ORCAMENTO_USD:
+        teto = (f" de US$ {settings.ORCAMENTO_USD:.2f}"
+                if settings.ORCAMENTO_USD else "")
+        linhas.append(f"  gasto em API  US$ {gasto:.2f}{teto}")
+
+    linhas += ["", "--- fila ---"]
     total = repositorio.contar_por_status(conn)
     for status in sorted(total):
         linhas.append(f"  {status:<18} {total[status]}")

@@ -338,3 +338,81 @@ def listar_clips(conn, status=CLIP_SELECIONADO, limite=None):
         sql += " LIMIT ?"
         parametros.append(limite)
     return conn.execute(sql, parametros).fetchall()
+
+
+# --- custos de API paga -------------------------------------------------------
+
+def registrar_custo(conn, servico, custo_usd, referencia="", quantidade=0.0,
+                    unidade=""):
+    """Anota uma chamada cobrada. Chamado DEPOIS de a chamada ter sucesso.
+
+    Depois, e não antes, de propósito: uma chamada que falhou não é cobrada, e
+    registrá-la reservaria orçamento que nunca foi gasto — com um teto de dez
+    dólares, alguns erros bastariam para travar a fila sozinhos.
+    """
+    with escrita(conn):
+        conn.execute(
+            "INSERT INTO custos (servico, referencia, quantidade, unidade, custo_usd)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (servico, referencia, quantidade, unidade, custo_usd),
+        )
+
+
+def custo_acumulado(conn, servico=None):
+    """Total gasto, em USD. `servico=None` soma tudo."""
+    if servico is None:
+        linha = conn.execute("SELECT COALESCE(SUM(custo_usd), 0) FROM custos").fetchone()
+    else:
+        linha = conn.execute(
+            "SELECT COALESCE(SUM(custo_usd), 0) FROM custos WHERE servico = ?",
+            (servico,),
+        ).fetchone()
+    return float(linha[0])
+
+
+# --- renders ------------------------------------------------------------------
+
+def registrar_render(conn, clip_id, caminho, template_versao="", duracao_s=0.0):
+    """Grava (ou substitui) o artefato renderizado de um clip."""
+    with escrita(conn):
+        conn.execute(
+            "INSERT INTO renders (clip_id, caminho, template_versao, duracao_s)"
+            " VALUES (?, ?, ?, ?)"
+            " ON CONFLICT(clip_id) DO UPDATE SET"
+            "   caminho = excluded.caminho,"
+            "   template_versao = excluded.template_versao,"
+            "   duracao_s = excluded.duracao_s,"
+            "   renderizado_em = datetime('now', 'localtime')",
+            (clip_id, caminho, template_versao, duracao_s),
+        )
+
+
+def render(conn, clip_id):
+    """A linha de `renders` deste clip, ou None se ainda não foi renderizado."""
+    return conn.execute(
+        "SELECT * FROM renders WHERE clip_id = ?", (clip_id,)
+    ).fetchone()
+
+
+def clips_para_renderizar(conn, limite=None):
+    """Clips selecionados que ainda não têm arquivo, do melhor score para o pior.
+
+    A ausência de linha em `renders` é o que define "pendente" — não um status
+    novo em clips. Refazer um render é apagar a linha, não reabrir uma máquina
+    de estados.
+    """
+    sql = (
+        "SELECT c.*, f.video_id, f.titulo, f.canal_nome,"
+        "       m.video_path, m.transcricao_path"
+        " FROM clips c"
+        " JOIN fila_clips f ON f.id = c.fila_clip_id"
+        " LEFT JOIN midia m ON m.fila_clip_id = c.fila_clip_id"
+        " LEFT JOIN renders r ON r.clip_id = c.id"
+        " WHERE c.status = ? AND r.clip_id IS NULL"
+        " ORDER BY c.score_final DESC, c.id"
+    )
+    parametros = [CLIP_SELECIONADO]
+    if limite is not None:
+        sql += " LIMIT ?"
+        parametros.append(limite)
+    return conn.execute(sql, parametros).fetchall()

@@ -136,18 +136,56 @@ def texto_com_timestamps(transcricao, casas=1):
     return "\n".join(linhas)
 
 
-def transcrever_para_arquivo(audio_path, video_id, destino_dir=None, modelo=None,
-                             idioma=None):
+BACKEND_LOCAL = "local"
+BACKEND_OPENAI = "openai"
+
+
+def backend_ativo(backend=None):
+    """Qual motor de transcrição vale nesta execução.
+
+    Vazio em settings significa "decida": usa a API quando há OPENAI_API_KEY no
+    ambiente e cai no local quando não há. Deixar a API como padrão fixo
+    quebraria o pipeline numa máquina sem chave em vez de degradá-lo; deixar o
+    local como padrão fixo faria a chave configurada não servir para nada.
+    """
+    escolhido = (backend if backend is not None else settings.TRANSCRICAO_BACKEND)
+    escolhido = (escolhido or "").strip().lower()
+    if escolhido in (BACKEND_LOCAL, BACKEND_OPENAI):
+        return escolhido
+    if escolhido:
+        raise ErroTranscricao(
+            f"TRANSCRICAO_BACKEND inválido: {escolhido!r} "
+            f"(use {BACKEND_LOCAL!r} ou {BACKEND_OPENAI!r})."
+        )
+    return BACKEND_OPENAI if settings.OPENAI_API_KEY else BACKEND_LOCAL
+
+
+def transcrever_para_arquivo(audio_path, video_id, duracao_s=0.0, destino_dir=None,
+                             modelo=None, idioma=None, backend=None, cliente=None):
     """Transcreve e persiste. Reaproveita o .json se ele já existe.
 
     A reutilização é o que torna barato reprocessar o highlight_detect com um
     prompt novo — que é exatamente o que a etapa 7 vai fazer em cima do
-    histórico.
+    histórico. Com a API paga ela também é o que impede pagar duas vezes pelo
+    mesmo áudio.
+
+    O backend é escolhido aqui e some daqui para baixo: os dois devolvem o
+    mesmo dict, então nada depois desta função sabe qual rodou.
     """
     destino = caminho_para(video_id, destino_dir)
     if os.path.exists(destino) and os.path.getsize(destino) > 0:
         log.info("Transcrição já existe: %s", destino)
         return destino, carregar(destino)
-    transcricao = transcrever(audio_path, modelo=modelo, idioma=idioma)
+
+    if backend_ativo(backend) == BACKEND_OPENAI:
+        from pipeline import whisper_api
+
+        transcricao = whisper_api.transcrever(
+            audio_path, duracao_s=duracao_s, cliente=cliente,
+            modelo=modelo, idioma=idioma,
+        )
+    else:
+        transcricao = transcrever(audio_path, modelo=modelo, idioma=idioma)
+
     salvar(transcricao, destino)
     return destino, transcricao

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import settings
 from pipeline import transcribe
 
 
@@ -157,6 +158,70 @@ def test_transcricao_sem_segmentos_vira_texto_vazio():
 
 
 # --- cache do modelo ----------------------------------------------------------
+
+def test_backend_explicito_ganha_do_ambiente(monkeypatch):
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "sk-tem-chave")
+    assert transcribe.backend_ativo("local") == transcribe.BACKEND_LOCAL
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "")
+    assert transcribe.backend_ativo("openai") == transcribe.BACKEND_OPENAI
+
+
+def test_backend_automatico_segue_a_chave(monkeypatch):
+    # Deixar a API como padrão fixo quebraria o pipeline numa máquina sem
+    # chave; deixar o local como padrão fixo faria a chave não servir de nada.
+    monkeypatch.setattr(settings, "TRANSCRICAO_BACKEND", "")
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "sk-tem-chave")
+    assert transcribe.backend_ativo() == transcribe.BACKEND_OPENAI
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "")
+    assert transcribe.backend_ativo() == transcribe.BACKEND_LOCAL
+
+
+def test_backend_invalido_falha_cedo():
+    with pytest.raises(transcribe.ErroTranscricao, match="TRANSCRICAO_BACKEND"):
+        transcribe.backend_ativo("azure")
+
+
+def test_despacha_para_a_api_quando_o_backend_e_openai(
+    tmp_path, audio, monkeypatch, cliente_openai
+):
+    monkeypatch.setattr(settings, "TRANSCRICAO_BACKEND", "openai")
+    chamadas = []
+
+    def falso(audio_path, duracao_s=0.0, cliente=None, modelo=None, idioma=None):
+        chamadas.append((audio_path, duracao_s))
+        return {"idioma": "pt", "duracao_s": duracao_s, "segmentos": []}
+
+    from pipeline import whisper_api
+    monkeypatch.setattr(whisper_api, "transcrever", falso)
+
+    caminho, resultado = transcribe.transcrever_para_arquivo(
+        audio, "vid1", duracao_s=600.0, destino_dir=str(tmp_path)
+    )
+    assert chamadas == [(audio, 600.0)]
+    assert resultado["duracao_s"] == 600.0
+
+
+def test_transcricao_existente_evita_pagar_duas_vezes(
+    tmp_path, audio, monkeypatch, transcricao
+):
+    monkeypatch.setattr(settings, "TRANSCRICAO_BACKEND", "openai")
+    destino_dir = str(tmp_path / "t")
+    transcribe.salvar(
+        transcricao((0.0, 2.0, "já pago")),
+        transcribe.caminho_para("vid1", destino_dir),
+    )
+
+    from pipeline import whisper_api
+    monkeypatch.setattr(
+        whisper_api, "transcrever",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("não deveria pagar"))
+    )
+
+    _, resultado = transcribe.transcrever_para_arquivo(
+        audio, "vid1", duracao_s=600.0, destino_dir=destino_dir
+    )
+    assert resultado["segmentos"][0]["texto"] == "já pago"
+
 
 def test_modelo_e_carregado_uma_vez_por_configuracao():
     # Carregar o Whisper leva segundos e centenas de MB; o pipeline transcreve

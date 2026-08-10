@@ -73,6 +73,7 @@ def _caminho(nome, padrao):
 # fallback: sem chave, quem precisa dela falha com mensagem clara.
 YOUTUBE_API_KEY = (os.getenv("YOUTUBE_API_KEY") or "").strip()
 ANTHROPIC_API_KEY = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
+OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
 
 # --- modo sombra --------------------------------------------------------------
 #
@@ -158,6 +159,56 @@ WHISPER_COMPUTE_TYPE = _caminho("WHISPER_COMPUTE_TYPE", "int8")
 # erro clássico de um trecho musical ser detectado como outro idioma.
 WHISPER_IDIOMA = _caminho("WHISPER_IDIOMA", "")
 
+# --- pipeline: transcrição pela API da OpenAI ---------------------------------
+#
+# 'local' (faster-whisper) | 'openai' (Whisper API) | '' (decide sozinho).
+#
+# O padrão automático usa a API quando há OPENAI_API_KEY no ambiente e cai no
+# local quando não há. Sem GPU, transcrever 4 h de áudio em CPU leva horas — a
+# API resolve em minutos —, mas ligá-la por padrão numa máquina sem chave
+# quebraria o pipeline em vez de degradá-lo.
+TRANSCRICAO_BACKEND = _caminho("TRANSCRICAO_BACKEND", "")
+
+# whisper-1 e não os modelos de transcrição mais novos: é o que aceita
+# `timestamp_granularities=["word"]`, e sem timestamp por palavra a legenda
+# word-by-word da etapa 3 não existe. Trocar por um modelo sem esse suporte
+# quebra a etapa 3, não esta.
+OPENAI_WHISPER_MODELO = _caminho("OPENAI_WHISPER_MODELO", "whisper-1")
+
+# Teto de upload da API, em MB. O áudio é comprimido para mp3 mono antes de
+# subir; o que ainda passar disso é fatiado.
+OPENAI_UPLOAD_MAX_MB = _float("OPENAI_UPLOAD_MAX_MB", 24.0)
+
+# Bitrate do mp3 enviado. 32 kbps mono é generoso para fala e derruba o
+# tamanho em ~50x contra o wav de trabalho — a API transcreve igual, e o wav
+# original continua em disco para o librosa.
+OPENAI_MP3_BITRATE = _caminho("OPENAI_MP3_BITRATE", "32k")
+
+# Duração máxima de cada fatia. A 32 kbps, 30 min dão ~7 MB: bem abaixo do
+# teto, com folga para áudio que comprime mal.
+OPENAI_CHUNK_MAX_S = _float("OPENAI_CHUNK_MAX_S", 1800.0)
+
+# Onde procurar silêncio para cortar a fatia. Cortar no meio de uma palavra
+# estraga uma palavra por fronteira; encostar o corte no silêncio mais próximo
+# custa uma passada de análise do ffmpeg e evita isso.
+OPENAI_CORTE_SILENCIO_DB = _caminho("OPENAI_CORTE_SILENCIO_DB", "-35dB")
+OPENAI_CORTE_SILENCIO_MIN_S = _float("OPENAI_CORTE_SILENCIO_MIN_S", 0.35)
+# Quanto o corte pode se afastar do alvo para achar silêncio.
+OPENAI_CORTE_TOLERANCIA_S = _float("OPENAI_CORTE_TOLERANCIA_S", 120.0)
+
+# --- orçamento da API paga ----------------------------------------------------
+#
+# Preço publicado do whisper-1, em USD por minuto de áudio. CONFERIR contra a
+# tabela vigente da OpenAI antes de confiar no número: é daqui que sai tanto a
+# estimativa quanto o corte de orçamento.
+WHISPER_API_USD_POR_MINUTO = _float("WHISPER_API_USD_POR_MINUTO", 0.006)
+
+# Teto de gasto acumulado (tabela `custos`). A transcrição que ultrapassaria o
+# teto é RECUSADA antes de subir o arquivo — o vídeo fica em 'falha' com o
+# motivo, em vez de o saldo acabar no meio da fila e metade dos vídeos voltarem
+# com erro de billing. 0 desliga a guarda.
+ORCAMENTO_USD = _float("ORCAMENTO_USD", 10.0)
+
 # --- pipeline: highlight_detect (Claude) --------------------------------------
 
 # Ver docs/ e pipeline/highlight_detect.py. Opus 5 tem contexto de 1M, o que
@@ -229,3 +280,18 @@ FATOR_ENERGIA_MAX = _float("FATOR_ENERGIA_MAX", 1.15)
 
 # Densidade (picos por minuto) a partir da qual o fator satura em MAX.
 DENSIDADE_PICOS_PLENA = _float("DENSIDADE_PICOS_PLENA", 4.0)
+
+# --- editing (etapa 3) --------------------------------------------------------
+#
+# Aqui ficam só caminho e volume. TODO parâmetro visual — fonte, cor, posição,
+# reframe, zoom, watermark, codec — mora em editing/template_config.json, por
+# decisão do projeto: ajustar o visual do clip não pode exigir editar código
+# nem mexer no .env.
+TEMPLATE_CONFIG_PATH = _caminho(
+    "TEMPLATE_CONFIG_PATH", os.path.join(_BASE_DIR, "editing", "template_config.json")
+)
+RENDER_DIR = _caminho("CLIPS_RENDER_DIR", os.path.join(_BASE_DIR, "render"))
+
+# Clips renderizados por execução. Render é a etapa mais cara em tempo de CPU
+# do pipeline inteiro; o teto existe para a execução ter fim previsível.
+EDITING_MAX_CLIPS = _int("EDITING_MAX_CLIPS", 10)

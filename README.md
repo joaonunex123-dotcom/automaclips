@@ -4,8 +4,9 @@ Pipeline automatizado de clips verticais: descobre vídeos em alta nos canais
 monitorados, recorta os melhores trechos, edita com legenda e SFX, publica e
 recalibra a seleção com base no que performou.
 
-Estado: **etapa 2 de 7** — sourcing, fila e pipeline até a seleção de trechos.
-As etapas seguintes estão listadas em [Roadmap](#roadmap).
+Estado: **etapa 3 de 7** — do canal monitorado ao clip vertical renderizado,
+com legenda queimada. Ainda sem SFX e sem publicação. As etapas seguintes estão
+listadas em [Roadmap](#roadmap).
 
 ## Instalação
 
@@ -65,6 +66,14 @@ retomável: o download de um vídeo de duas horas não é refeito porque o Whisp
 morreu depois dele. Falha em um vídeo não derruba os outros — ele vai para
 `falha` com o motivo na coluna `erro` e a fila continua.
 
+```bash
+python -m editing.editar
+```
+
+Renderiza os trechos selecionados como .mp4 vertical, com legenda queimada,
+hook de abertura e watermark — tudo pelo `template_config.json`. Nada é
+publicado: com `AUTO_PUBLISH=false` os clips só ficam em `render/`.
+
 Os módulos rodam com `python -m` (e não `python sourcing/descobrir.py`) porque
 importam entre pacotes: `-m` põe a raiz do repositório no `sys.path`.
 
@@ -118,6 +127,62 @@ dois lados se curto), corte por limiar, e resolução de sobreposição mantendo
 de maior score. Tudo que sai vira linha com `status = 'descartado'` e o motivo —
 sem isso só se saberia como performou o que passou, nunca o que foi barrado.
 
+## Transcrição: local ou pela API
+
+Dois backends, mesmo contrato de saída — nada depois de `transcribe.py` sabe
+qual rodou.
+
+| backend | quando |
+| --- | --- |
+| `local` (faster-whisper) | sem custo; em CPU, transcrever 4 h leva horas |
+| `openai` (Whisper API) | minutos em vez de horas; cobrado por minuto de áudio |
+
+`TRANSCRICAO_BACKEND` vazio decide sozinho: usa a API quando há
+`OPENAI_API_KEY` no ambiente, cai no local quando não há. Fixar a API como
+padrão quebraria o pipeline numa máquina sem chave; fixar o local faria a chave
+configurada não servir para nada.
+
+Dois obstáculos moldam o caminho da API. O wav de trabalho tem ~1,9 MB por
+minuto, então treze minutos já batem no teto de upload — o áudio é recomprimido
+para mp3 mono de 32 kbps antes de subir (~50x menor, transcrição igual). E o
+que ainda passa do teto é **fatiado no silêncio mais próximo** do alvo, achado
+pelo `silencedetect` do ffmpeg: cortar no meio de uma palavra estraga uma
+palavra por fronteira, e as fronteiras caem em posições arbitrárias — uma delas
+eventualmente cai dentro de um clip. Os timestamps de cada fatia voltam
+relativos a ela e são deslocados na normalização.
+
+**Orçamento.** Como o preço é por minuto de áudio, o custo é conhecido *antes*
+da chamada. Cada transcrição paga é registrada na tabela `custos`, e a que
+ultrapassaria `ORCAMENTO_USD` (padrão 10) é **recusada antes de subir o
+arquivo** — o vídeo fica em `falha` com o motivo. Sem isso o modo de falha real
+é o saldo acabar no meio de uma execução noturna e metade da fila voltar com
+erro de billing. `ORCAMENTO_USD=0` desliga a guarda.
+
+O gasto acumulado aparece no resumo de `python -m pipeline.processar`.
+
+## O template do clip
+
+Todo parâmetro visual mora em
+[`editing/template_config.json`](editing/template_config.json) — fonte,
+tamanho, cor, posição, reframe, zoom, watermark, codec. Nada disso existe no
+código: ajustar o visual é editar o JSON e renderizar de novo.
+
+Legenda, hook e watermark saem de um **único arquivo .ass**, não de filtros
+`drawtext`. Fazê-los com drawtext exigiria um filtro por palavra (centenas por
+clip) mais um caminho de fonte absoluto que muda por sistema operacional. Como
+consequência útil, a parte mais detalhista da etapa — o sincronismo palavra a
+palavra — vira geração de string, testável sem ffmpeg instalado.
+
+O destaque anda palavra a palavra, mas a linha inteira fica na tela (legenda de
+clip é lida em tela pequena), e cada evento se estende até a palavra seguinte —
+sem isso a legenda apagaria na pausa entre duas palavras e piscaria a cada
+respiro do locutor.
+
+`versao` é gravada junto de cada render. É o que permite saber, na etapa 7, se
+a diferença de performance entre dois clips veio do trecho ou do visual —
+**mude a versão sempre que mexer no template**, senão a série histórica mistura
+dois visuais sem deixar rastro.
+
 ## Estrutura
 
 ```
@@ -131,11 +196,18 @@ sourcing/score.py            a fórmula (função pura)
 sourcing/descobrir.py        decide o status e orquestra a varredura
 
 pipeline/download.py         yt-dlp + extração do áudio de trabalho
-pipeline/transcribe.py       faster-whisper, com timestamp por palavra
+pipeline/transcribe.py       faster-whisper local, e a escolha de backend
+pipeline/whisper_api.py      Whisper API: compressão, fatiamento, custo
 pipeline/energia.py          picos de RMS (só carregar_audio toca o librosa)
 pipeline/highlight_detect.py Claude sobre a transcrição
 pipeline/select_clips.py     duração, energia, limiar, sobreposição
-pipeline/processar.py        orquestra a fila, com retomada
+pipeline/processar.py        orquestra a fila, com retomada e orçamento
+
+editing/template_config.json TODO parâmetro visual, nada no código
+editing/template.py          carga e validação do template
+editing/legendas.py          gera o .ass (string pura, sem ffmpeg)
+editing/render.py            monta e executa o comando do ffmpeg
+editing/editar.py            orquestra a fila de render
 ```
 
 `fila_clips` guarda o vídeo-FONTE; `midia` os artefatos baixados; `clips` os
@@ -185,10 +257,10 @@ qualquer commit.
 ## Roadmap
 
 1. ~~`db/schema.sql` + `sourcing/` + fila~~
-2. **`pipeline/` — download, transcrição, `highlight_detect` (Claude + picos de
-   energia via librosa)** ← aqui
-3. `editing/` — template fixo em `template_config.json`, reframe + legendas
-   word-by-word
+2. ~~`pipeline/` — download, transcrição, `highlight_detect` (Claude + picos de
+   energia via librosa)~~
+3. **`editing/` — template fixo em `template_config.json`, reframe + legendas
+   word-by-word** ← aqui
 4. SFX (whoosh nos cortes, ding/pop nos picos)
 5. `publish/` em modo sombra (`AUTO_PUBLISH=false`: gera e não posta)
 6. Publicação real com `scheduler.py`, respeitando quota

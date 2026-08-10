@@ -31,8 +31,8 @@ def injecoes(transcricao, trecho):
             "duracao_real_s": 600.0,
         }
 
-    def transcrever(audio_path, video_id):
-        estado["transcreveu"].append(video_id)
+    def transcrever(audio_path, video_id, duracao_s=0.0):
+        estado["transcreveu"].append((video_id, duracao_s))
         return (
             f"/tmp/{video_id}.json",
             transcricao((10.0, 14.0, "boa noite"), (100.0, 145.0, "a virada")),
@@ -65,7 +65,7 @@ def test_leva_o_video_de_descoberto_a_analisado(conn, enfileirar, injecoes):
         repositorio.STATUS_ANALISADO
     )
     assert estado["baixou"] == ["vid1"]
-    assert estado["transcreveu"] == ["vid1"]
+    assert [v for v, _ in estado["transcreveu"]] == ["vid1"]
 
     clips = repositorio.clips_do_video(conn, clip_id,
                                        status=repositorio.CLIP_SELECIONADO)
@@ -122,7 +122,7 @@ def test_video_ja_baixado_nao_e_rebaixado(conn, enfileirar, injecoes):
     processar.processar_fila(conn, **duplos)
 
     assert estado["baixou"] == []
-    assert estado["transcreveu"] == ["vid1"]
+    assert [v for v, _ in estado["transcreveu"]] == ["vid1"]
     assert estado["picos"] == ["/ja/vid1.wav"]
 
 
@@ -143,6 +143,89 @@ def test_video_ja_transcrito_nao_e_retranscrito(conn, enfileirar, injecoes,
 
     assert estado["baixou"] == [] and estado["transcreveu"] == []
     assert estado["detectou"] == ["[100.0] do disco"]
+
+
+def test_a_duracao_medida_chega_a_transcricao(conn, enfileirar, injecoes):
+    # A Whisper API precisa dela para estimar custo e decidir o fatiamento.
+    estado, duplos = injecoes
+    enfileirar()
+    processar.processar_fila(conn, **duplos)
+    assert estado["transcreveu"] == [("vid1", 600.0)]
+
+
+# --- orçamento ----------------------------------------------------------------
+
+def test_backend_local_nao_registra_custo(conn, enfileirar, injecoes, monkeypatch):
+    _, duplos = injecoes
+    monkeypatch.setattr(settings, "TRANSCRICAO_BACKEND", "local")
+    enfileirar()
+
+    processar.processar_fila(conn, **duplos)
+    assert repositorio.custo_acumulado(conn) == 0.0
+
+
+def test_backend_pago_registra_o_custo_apos_o_sucesso(conn, enfileirar, injecoes,
+                                                      monkeypatch):
+    _, duplos = injecoes
+    monkeypatch.setattr(settings, "TRANSCRICAO_BACKEND", "openai")
+    monkeypatch.setattr(settings, "WHISPER_API_USD_POR_MINUTO", 0.006)
+    enfileirar()
+
+    processar.processar_fila(conn, **duplos)
+    # 600 s = 10 min a 0,006 = 0,06
+    assert repositorio.custo_acumulado(conn) == pytest.approx(0.06)
+
+
+def test_falha_nao_consome_orcamento(conn, enfileirar, injecoes, monkeypatch):
+    # Chamada que falhou não é cobrada; reservar orçamento para ela travaria a
+    # fila com alguns erros.
+    _, duplos = injecoes
+    monkeypatch.setattr(settings, "TRANSCRICAO_BACKEND", "openai")
+    duplos["transcrever"] = lambda *a, **k: (_ for _ in ()).throw(
+        RuntimeError("API caiu")
+    )
+    enfileirar()
+
+    processar.processar_fila(conn, **duplos)
+    assert repositorio.custo_acumulado(conn) == 0.0
+
+
+def test_teto_estourado_recusa_antes_de_gastar(conn, enfileirar, injecoes,
+                                               monkeypatch):
+    estado, duplos = injecoes
+    monkeypatch.setattr(settings, "TRANSCRICAO_BACKEND", "openai")
+    monkeypatch.setattr(settings, "ORCAMENTO_USD", 0.05)
+    monkeypatch.setattr(settings, "WHISPER_API_USD_POR_MINUTO", 0.006)
+    enfileirar()
+
+    contagem = processar.processar_fila(conn, **duplos)
+
+    assert contagem == {repositorio.STATUS_FALHA: 1}
+    assert estado["transcreveu"] == []          # nada foi enviado
+    linha = repositorio.buscar_video(conn, "youtube", "vid1")
+    assert "ORCAMENTO_USD" in linha["erro"]
+
+
+def test_teto_considera_o_ja_gasto(conn, enfileirar, injecoes, monkeypatch):
+    _, duplos = injecoes
+    monkeypatch.setattr(settings, "TRANSCRICAO_BACKEND", "openai")
+    monkeypatch.setattr(settings, "ORCAMENTO_USD", 10.0)
+    repositorio.registrar_custo(conn, "openai:whisper-1", 9.99)
+    enfileirar()
+
+    contagem = processar.processar_fila(conn, **duplos)
+    assert contagem == {repositorio.STATUS_FALHA: 1}
+
+
+def test_teto_zero_desliga_a_guarda(conn, enfileirar, injecoes, monkeypatch):
+    _, duplos = injecoes
+    monkeypatch.setattr(settings, "TRANSCRICAO_BACKEND", "openai")
+    monkeypatch.setattr(settings, "ORCAMENTO_USD", 0.0)
+    repositorio.registrar_custo(conn, "openai:whisper-1", 500.0)
+    enfileirar()
+
+    contagem = processar.processar_fila(conn, **duplos)
+    assert contagem == {repositorio.STATUS_ANALISADO: 1}
 
 
 # --- isolamento de falha ------------------------------------------------------

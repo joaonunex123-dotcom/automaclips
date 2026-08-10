@@ -8,6 +8,7 @@ python-dotenv>=1.0.0
 # que a usa, para a suíte de testes rodar (e o resto do pipeline continuar
 # importável) numa máquina que não tenha meio gigabyte de wheel instalado.
 anthropic>=0.116.0
+openai>=1.30.0
 yt-dlp>=2024.1.0
 faster-whisper>=1.0.0
 librosa>=0.10.0

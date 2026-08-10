@@ -1,5 +1,10 @@
 # Segredos — todas as chaves de API vivem aqui, nunca no código.
 .env
+.env.local
+*.pem
+*.key
+credentials.json
+token.json
 
 # Banco: fonte de verdade em runtime, não artefato de código. Os arquivos
 # -wal/-shm são do WAL mode e mudam a cada escrita.
@@ -11,12 +16,36 @@
 # canais de baixa performance). Versionado é o canais.exemplo.json.
 sourcing/canais.json
 
-# Mídia baixada e renderizada — pesada e reconstruível a partir da fila.
+# Mídia baixada, intermediária e renderizada — pesada e toda reconstruível a
+# partir da fila. Inclui os .mp3 fatiados para a Whisper API, os .json de
+# transcrição e os .ass/.mp4 de cada clip.
 downloads/
 render/
 clips/
+*.mp4
+*.mkv
+*.webm
+*.wav
+*.mp3
+*.ass
 
+# Efeitos sonoros da etapa 4: binários grandes, licenciados individualmente.
+# Versionado é o template_config.json que os referencia.
+assets/sfx/
+
+# Ambiente e cache do Python.
 venv/
+.venv/
+env/
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Editor e sistema operacional.
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

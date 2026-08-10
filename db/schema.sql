@@ -195,3 +195,49 @@ CREATE INDEX IF NOT EXISTS ix_clips_status_score
     ON clips (status, score_final DESC);
 CREATE INDEX IF NOT EXISTS ix_clips_fila
     ON clips (fila_clip_id);
+
+-- Gasto com API paga, uma linha por chamada cobrada.
+--
+-- Existe porque o orçamento é pequeno e finito: sem o acumulado no banco, a
+-- única forma de saber quanto sobrou é abrir o painel do provedor, e o
+-- pipeline roda sozinho. É esta soma que db/repositorio.custo_acumulado lê
+-- para RECUSAR uma chamada antes de fazê-la, em vez de descobrir o saldo
+-- estourado no meio da fila.
+--
+-- `quantidade` é a unidade que o provedor cobra (minutos de áudio, para o
+-- Whisper), guardada junto para o custo poder ser reconferido contra a tabela
+-- de preços vigente depois — o preço unitário muda, o consumo não.
+CREATE TABLE IF NOT EXISTS custos (
+    id           INTEGER PRIMARY KEY,
+    servico      TEXT NOT NULL,
+    referencia   TEXT NOT NULL DEFAULT '',
+    quantidade   REAL NOT NULL DEFAULT 0,
+    unidade      TEXT NOT NULL DEFAULT '',
+    custo_usd    REAL NOT NULL,
+    registrado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+CREATE INDEX IF NOT EXISTS ix_custos_servico ON custos (servico, registrado_em);
+
+-- ============================================================================
+-- Etapa 3 — editing
+-- ============================================================================
+
+-- O arquivo renderizado de um clip.
+--
+-- Tabela separada, e não uma coluna `status = 'renderizado'` em clips, porque
+-- as duas coisas respondem perguntas diferentes: `clips.status` é o VEREDITO
+-- da seleção (entrou ou não entrou), e o render é um ARTEFATO que pode ser
+-- refeito com um template novo sem que o veredito mude. Com a presença da
+-- linha valendo como "já renderizado", refazer é apagar o arquivo e a linha —
+-- não reabrir uma máquina de estados.
+CREATE TABLE IF NOT EXISTS renders (
+    clip_id         INTEGER PRIMARY KEY REFERENCES clips(id),
+    caminho         TEXT NOT NULL,
+    -- Versão do template_config.json usada. É o que permite saber, na etapa 7,
+    -- se a diferença de performance entre dois clips veio do trecho ou do
+    -- visual — sem isso, uma mudança de template contamina a série histórica
+    -- inteira sem deixar rastro.
+    template_versao TEXT NOT NULL DEFAULT '',
+    duracao_s       REAL NOT NULL DEFAULT 0,
+    renderizado_em  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);

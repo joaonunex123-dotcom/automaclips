@@ -5,6 +5,7 @@ um tmp_path por teste, e a API do YouTube entra por duplo. É o que permite
 rodar a suíte inteira sem chave de API e sem quota.
 """
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -227,6 +228,72 @@ def transcricao():
         ]
         return {"idioma": idioma, "duracao_s": duracao_s, "segmentos": segmentos}
     return _fn
+
+
+class ClienteOpenAIFalso:
+    """Duplo do cliente da OpenAI, só a superfície de transcrição."""
+
+    def __init__(self, respostas=None, erro=None):
+        self._respostas = list(respostas or [])
+        self._erro = erro
+        self.chamadas = []
+        self.audio = SimpleNamespace(
+            transcriptions=SimpleNamespace(create=self._create)
+        )
+
+    def _create(self, file=None, **kwargs):
+        self.chamadas.append(
+            {"arquivo": os.path.basename(getattr(file, "name", "")), **kwargs}
+        )
+        if self._erro:
+            raise self._erro
+        if self._respostas:
+            return self._respostas.pop(0)
+        return {"language": "portuguese", "duration": 0.0, "text": "",
+                "segments": [], "words": []}
+
+
+@pytest.fixture
+def cliente_openai():
+    return ClienteOpenAIFalso
+
+
+@pytest.fixture
+def executar_ok():
+    """Duplo de subprocess.run que 'cria' o arquivo de saída e registra a chamada."""
+    def _fabricar(registro=None, returncode=0, stderr="", criar_saida=True):
+        def executar(comando, **kwargs):
+            if registro is not None:
+                registro.append({"comando": comando, **kwargs})
+            if returncode == 0 and criar_saida:
+                alvo = comando[-1]
+                if alvo not in ("-", "NUL", "/dev/null"):
+                    with open(alvo, "w", encoding="utf-8") as f:
+                        f.write("saida")
+            return SimpleNamespace(returncode=returncode, stderr=stderr, stdout="")
+        return executar
+    return _fabricar
+
+
+@pytest.fixture
+def ffmpeg_fake(tmp_path):
+    """Caminho de ffmpeg que existe, para não depender do PATH da máquina."""
+    caminho = tmp_path / "ffmpeg.exe"
+    caminho.write_text("", encoding="utf-8")
+    return str(caminho)
+
+
+@pytest.fixture
+def template():
+    """O template_config.json real do repositório, carregado e validado.
+
+    De propósito o arquivo de verdade: se o template que acompanha o repo não
+    passar na própria validação, a etapa 3 nasce quebrada e nenhum teste com
+    config sintético perceberia.
+    """
+    from editing import template as template_mod
+
+    return template_mod.carregar()
 
 
 @pytest.fixture
