@@ -295,3 +295,96 @@ RENDER_DIR = _caminho("CLIPS_RENDER_DIR", os.path.join(_BASE_DIR, "render"))
 # Clips renderizados por execução. Render é a etapa mais cara em tempo de CPU
 # do pipeline inteiro; o teto existe para a execução ter fim previsível.
 EDITING_MAX_CLIPS = _int("EDITING_MAX_CLIPS", 10)
+
+
+def _lista(nome, padrao):
+    """Lista separada por vírgula no ambiente. Vazio cai no default."""
+    bruto = (os.getenv(nome) or "").strip()
+    if not bruto:
+        return list(padrao)
+    return [item.strip() for item in bruto.split(",") if item.strip()]
+
+
+# --- publish (etapa 5) --------------------------------------------------------
+
+PLATAFORMA_YOUTUBE = "youtube"
+PLATAFORMA_INSTAGRAM = "instagram"
+
+# Para onde publicar. Remover uma daqui é o jeito de rodar só num canal.
+PLATAFORMAS = _lista("PLATAFORMAS", [PLATAFORMA_YOUTUBE, PLATAFORMA_INSTAGRAM])
+
+# Publicações por dia, por plataforma.
+POSTS_POR_DIA = _int("POSTS_POR_DIA", 3)
+
+# Horários de queda, em HH:MM local. São o FALLBACK: a partir da etapa 7 o
+# scheduler prefere os horários que o histórico de engajamento mostrar
+# melhores, e só cai aqui enquanto não houver histórico. Estes três são
+# palpite de horário de pico de consumo — substitua pelos seus assim que a
+# etapa 7 tiver dado.
+HORARIOS_PADRAO = _lista("HORARIOS_PADRAO", ["12:00", "18:00", "21:00"])
+
+# Distância mínima entre duas publicações na MESMA plataforma. Dois clips
+# seguidos competem entre si pela mesma audiência no feed.
+INTERVALO_MINIMO_MIN = _int("INTERVALO_MINIMO_MIN", 120)
+
+# Quantos dias à frente o scheduler pode agendar. Sem teto, uma fila grande
+# marcaria posts para daqui a meses — e clip de assunto quente não sobrevive
+# a isso.
+AGENDAMENTO_MAX_DIAS = _int("AGENDAMENTO_MAX_DIAS", 7)
+
+# --- publish: quota do YouTube ------------------------------------------------
+
+# Números publicados pela API v3: cada upload custa 1600 unidades de um teto
+# diário de 10.000. Na prática, seis uploads por dia.
+YOUTUBE_QUOTA_DIARIA = _int("YOUTUBE_QUOTA_DIARIA", 10000)
+YOUTUBE_CUSTO_UPLOAD = _int("YOUTUBE_CUSTO_UPLOAD", 1600)
+
+# A quota do YouTube zera à meia-noite do PACÍFICO, não do fuso local. Usar a
+# data daqui faria o contador virar em outro momento que o teto de verdade —
+# em parte do ano, três horas de diferença. Ver publish/quota.py.
+QUOTA_FUSO = _caminho("QUOTA_FUSO", "America/Los_Angeles")
+
+# --- publish: YouTube ---------------------------------------------------------
+#
+# Upload exige OAuth, não a chave de API que o sourcing usa: são credenciais
+# diferentes, do mesmo projeto do Google Cloud.
+YOUTUBE_CLIENT_SECRETS = _caminho(
+    "YOUTUBE_CLIENT_SECRETS", os.path.join(_BASE_DIR, "client_secrets.json")
+)
+YOUTUBE_OAUTH_TOKEN = _caminho(
+    "YOUTUBE_OAUTH_TOKEN", os.path.join(_BASE_DIR, "youtube_token.json")
+)
+# 22 = People & Blogs. 'private' até você conferir os primeiros clips; troque
+# para 'public' quando confiar na fila.
+YOUTUBE_CATEGORIA = _caminho("YOUTUBE_CATEGORIA", "22")
+YOUTUBE_PRIVACIDADE = _caminho("YOUTUBE_PRIVACIDADE", "private")
+
+# --- publish: Instagram -------------------------------------------------------
+
+INSTAGRAM_USER_ID = _caminho("INSTAGRAM_USER_ID", "")
+INSTAGRAM_APP_ID = _caminho("INSTAGRAM_APP_ID", "")
+INSTAGRAM_APP_SECRET = _caminho("INSTAGRAM_APP_SECRET", "")
+# Token de longa duração INICIAL. Depois da primeira renovação o valor válido
+# passa a viver na tabela `tokens` — um segredo que o programa reescreve não
+# cabe num arquivo que o humano edita.
+INSTAGRAM_TOKEN_INICIAL = _caminho("INSTAGRAM_TOKEN_INICIAL", "")
+INSTAGRAM_API_BASE = _caminho("INSTAGRAM_API_BASE", "https://graph.instagram.com")
+# O token dura ~60 dias e pode ser renovado a partir de 24 h de vida. Renovar
+# com folga evita que uma semana sem rodar o pipeline deixe o token morrer.
+INSTAGRAM_RENOVAR_ANTES_DIAS = _int("INSTAGRAM_RENOVAR_ANTES_DIAS", 10)
+
+# O clip precisa estar acessível por URL pública para o Instagram baixá-lo: a
+# API não aceita upload direto de arquivo. Vazio = publicação no Instagram
+# fica indisponível (e o modo sombra avisa em vez de falhar no dia D).
+CLIPS_BASE_URL = _caminho("CLIPS_BASE_URL", "")
+
+# --- publish: metadata --------------------------------------------------------
+
+# Limites das plataformas, para o texto ser cortado aqui e não recusado lá.
+LIMITE_TITULO_YOUTUBE = _int("LIMITE_TITULO_YOUTUBE", 100)
+LIMITE_DESCRICAO_YOUTUBE = _int("LIMITE_DESCRICAO_YOUTUBE", 5000)
+LIMITE_CAPTION_INSTAGRAM = _int("LIMITE_CAPTION_INSTAGRAM", 2200)
+MAX_HASHTAGS = _int("MAX_HASHTAGS", 8)
+
+# Publicações processadas por execução.
+PUBLISH_MAX_POR_EXECUCAO = _int("PUBLISH_MAX_POR_EXECUCAO", 10)

@@ -13,6 +13,7 @@ não liga sozinho.
 O banco fica na raiz do projeto (clips.db), sobrescrevível por CLIPS_DB_PATH
 no ambiente; os testes apontam para um arquivo temporário.
 """
+import json
 import logging
 import sqlite3
 from contextlib import contextmanager
@@ -411,6 +412,190 @@ def render(conn, clip_id):
     return conn.execute(
         "SELECT * FROM renders WHERE clip_id = ?", (clip_id,)
     ).fetchone()
+
+
+# --- publicações --------------------------------------------------------------
+
+PUB_AGENDADO = "agendado"
+PUB_SIMULADO = "simulado"
+PUB_PUBLICADO = "publicado"
+PUB_FALHA = "falha"
+
+
+def clips_para_agendar(conn, plataforma, limite=None):
+    """Clips renderizados ainda sem agendamento NESTA plataforma.
+
+    O JOIN com `renders` é o que garante que só entra na fila de publicação o
+    que tem arquivo: agendar um clip que ainda não renderizou marcaria um
+    horário para um vídeo que não existe.
+    """
+    sql = (
+        "SELECT c.*, r.caminho AS render_path, r.duracao_s AS render_duracao_s,"
+        "       f.video_id, f.titulo AS titulo_fonte, f.canal_nome,"
+        "       f.url AS url_fonte"
+        " FROM clips c"
+        " JOIN renders r ON r.clip_id = c.id"
+        " JOIN fila_clips f ON f.id = c.fila_clip_id"
+        " LEFT JOIN publicacoes p ON p.clip_id = c.id AND p.plataforma = ?"
+        " WHERE c.status = ? AND p.id IS NULL"
+        " ORDER BY c.score_final DESC, c.id"
+    )
+    parametros = [plataforma, CLIP_SELECIONADO]
+    if limite is not None:
+        sql += " LIMIT ?"
+        parametros.append(limite)
+    return conn.execute(sql, parametros).fetchall()
+
+
+def agendar_publicacao(conn, clip_id, plataforma, agendado_para, titulo="",
+                       descricao="", hashtags=None):
+    """Cria a publicação em 'agendado'. Devolve o id."""
+    with escrita(conn):
+        cursor = conn.execute(
+            "INSERT INTO publicacoes"
+            " (clip_id, plataforma, titulo, descricao, hashtags, agendado_para,"
+            "  status)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                clip_id, plataforma, titulo, descricao,
+                json.dumps(list(hashtags or []), ensure_ascii=False),
+                agendado_para, PUB_AGENDADO,
+            ),
+        )
+        return cursor.lastrowid
+
+
+def horarios_agendados(conn, plataforma, desde=None):
+    """Horários já ocupados numa plataforma — o scheduler não pode repetir.
+
+    Inclui 'simulado' e 'publicado' de propósito: um horário que já rendeu um
+    post, ainda que só no modo sombra, está gasto. Ignorá-los faria a fila real
+    empilhar dois clips no mesmo minuto ao sair da sombra.
+    """
+    sql = "SELECT agendado_para FROM publicacoes WHERE plataforma = ?"
+    parametros = [plataforma]
+    if desde is not None:
+        sql += " AND agendado_para >= ?"
+        parametros.append(desde)
+    return [linha[0] for linha in conn.execute(sql, parametros).fetchall()]
+
+
+def publicacoes_vencidas(conn, plataforma=None, agora=None, limite=None):
+    """Agendamentos cuja hora chegou, do mais antigo para o mais novo."""
+    sql = "SELECT p.*, r.caminho AS render_path, f.video_id" \
+          " FROM publicacoes p" \
+          " JOIN clips c ON c.id = p.clip_id" \
+          " LEFT JOIN renders r ON r.clip_id = p.clip_id" \
+          " JOIN fila_clips f ON f.id = c.fila_clip_id" \
+          " WHERE p.status = ?"
+    parametros = [PUB_AGENDADO]
+    if plataforma is not None:
+        sql += " AND p.plataforma = ?"
+        parametros.append(plataforma)
+    if agora is not None:
+        sql += " AND p.agendado_para <= ?"
+        parametros.append(agora)
+    sql += " ORDER BY p.agendado_para, p.id"
+    if limite is not None:
+        sql += " LIMIT ?"
+        parametros.append(limite)
+    return conn.execute(sql, parametros).fetchall()
+
+
+def marcar_publicacao(conn, publicacao_id, status, id_externo="", url="",
+                      erro=None):
+    """Desfecho de uma tentativa de publicação."""
+    with escrita(conn):
+        conn.execute(
+            "UPDATE publicacoes SET status = ?, id_externo = ?, url = ?,"
+            " erro = ?, publicado_em = CASE WHEN ? IN ('publicado', 'simulado')"
+            "   THEN datetime('now', 'localtime') ELSE publicado_em END"
+            " WHERE id = ?",
+            (status, id_externo, url, erro, status, publicacao_id),
+        )
+
+
+def reagendar_simulados(conn, plataforma=None):
+    """Devolve as publicações do modo sombra para 'agendado'.
+
+    É a ponte da etapa 5 para a 6: ao ligar AUTO_PUBLISH, o que já foi
+    planejado e simulado volta para a fila em vez de ser reconstruído do zero
+    — o metadado gerado (e pago) continua valendo.
+    """
+    sql = "UPDATE publicacoes SET status = ?, publicado_em = NULL WHERE status = ?"
+    parametros = [PUB_AGENDADO, PUB_SIMULADO]
+    if plataforma is not None:
+        sql += " AND plataforma = ?"
+        parametros.append(plataforma)
+    with escrita(conn):
+        return conn.execute(sql, parametros).rowcount
+
+
+def contar_publicacoes(conn):
+    """{(plataforma, status): quantidade}."""
+    linhas = conn.execute(
+        "SELECT plataforma, status, COUNT(*) AS n FROM publicacoes"
+        " GROUP BY plataforma, status"
+    ).fetchall()
+    return {(l["plataforma"], l["status"]): l["n"] for l in linhas}
+
+
+def proximas_publicacoes(conn, limite=10):
+    """A agenda, para o resumo."""
+    return conn.execute(
+        "SELECT p.*, f.video_id FROM publicacoes p"
+        " JOIN clips c ON c.id = p.clip_id"
+        " JOIN fila_clips f ON f.id = c.fila_clip_id"
+        " WHERE p.status IN (?, ?)"
+        " ORDER BY p.agendado_para LIMIT ?",
+        (PUB_AGENDADO, PUB_SIMULADO, limite),
+    ).fetchall()
+
+
+# --- quota de API -------------------------------------------------------------
+
+def quota_usada(conn, servico, dia):
+    linha = conn.execute(
+        "SELECT unidades FROM quota_api WHERE servico = ? AND dia = ?",
+        (servico, dia),
+    ).fetchone()
+    return int(linha[0]) if linha else 0
+
+
+def registrar_quota(conn, servico, dia, unidades):
+    """Soma consumo ao dia. Chamado DEPOIS da chamada que gastou.
+
+    Antes reservaria quota de uma chamada que pode falhar — e quota, ao
+    contrário de dinheiro, não volta: o teto é diário e uma reserva errada
+    custa um upload que caberia.
+    """
+    with escrita(conn):
+        conn.execute(
+            "INSERT INTO quota_api (servico, dia, unidades) VALUES (?, ?, ?)"
+            " ON CONFLICT(servico, dia) DO UPDATE SET"
+            "   unidades = unidades + excluded.unidades",
+            (servico, dia, int(unidades)),
+        )
+
+
+# --- tokens que giram ---------------------------------------------------------
+
+def obter_token(conn, servico):
+    """A linha de `tokens`, ou None se nunca foi salvo."""
+    return conn.execute(
+        "SELECT * FROM tokens WHERE servico = ?", (servico,)
+    ).fetchone()
+
+
+def salvar_token(conn, servico, token, expira_em=None):
+    with escrita(conn):
+        conn.execute(
+            "INSERT INTO tokens (servico, token, expira_em) VALUES (?, ?, ?)"
+            " ON CONFLICT(servico) DO UPDATE SET"
+            "   token = excluded.token, expira_em = excluded.expira_em,"
+            "   atualizado_em = datetime('now', 'localtime')",
+            (servico, token, expira_em),
+        )
 
 
 def clips_para_renderizar(conn, limite=None):

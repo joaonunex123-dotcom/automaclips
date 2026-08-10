@@ -264,3 +264,77 @@ CREATE TABLE IF NOT EXISTS renders (
     duracao_s       REAL NOT NULL DEFAULT 0,
     renderizado_em  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
+
+-- ============================================================================
+-- Etapa 5 — publish (modo sombra)
+-- ============================================================================
+
+-- Uma publicação planejada de um clip numa plataforma.
+--
+-- A linha nasce em 'agendado' e o horário é decidido pelo scheduler; quem
+-- publica só procura o que já venceu. Separar AGENDAR de PUBLICAR é o que
+-- permite o modo sombra: a fila inteira é montada de verdade, com metadado
+-- gerado e horário atribuído, e só a chamada à plataforma fica de fora.
+--
+-- Estados:
+--   agendado   tem horário, esperando a hora chegar
+--   simulado   a hora chegou com AUTO_PUBLISH=false — tudo pronto, nada
+--              enviado. É o estado normal de todo o modo sombra.
+--   publicado  saiu de verdade; id_externo e url preenchidos
+--   falha      tentou e não foi; motivo em `erro`
+CREATE TABLE IF NOT EXISTS publicacoes (
+    id            INTEGER PRIMARY KEY,
+    clip_id       INTEGER NOT NULL REFERENCES clips(id) ON DELETE CASCADE,
+    plataforma    TEXT NOT NULL,
+
+    -- Metadado gerado pelo LLM. `hashtags` é uma lista JSON: guardar o texto
+    -- já concatenado impediria a etapa 7 de correlacionar performance com
+    -- hashtag individual, que é a pergunta óbvia a se fazer depois.
+    titulo        TEXT NOT NULL DEFAULT '',
+    descricao     TEXT NOT NULL DEFAULT '',
+    hashtags      TEXT NOT NULL DEFAULT '[]',
+
+    agendado_para TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'agendado',
+
+    id_externo    TEXT NOT NULL DEFAULT '',
+    url           TEXT NOT NULL DEFAULT '',
+    erro          TEXT,
+
+    criado_em     TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    publicado_em  TEXT,
+
+    -- O mesmo clip não pode ser agendado duas vezes na mesma plataforma. Em
+    -- plataformas diferentes pode e deve — é o mesmo clip rendendo duas vezes.
+    UNIQUE (clip_id, plataforma)
+);
+CREATE INDEX IF NOT EXISTS ix_publicacoes_agenda
+    ON publicacoes (plataforma, status, agendado_para);
+
+-- Consumo de quota de API por dia, para não descobrir o teto estourado no
+-- meio de um upload.
+--
+-- `dia` NÃO é a data local: o YouTube zera a quota à meia-noite do Pacífico.
+-- Usar a data daqui faria o contador virar em outro momento do que o teto de
+-- verdade — em parte do ano com três horas de diferença, o suficiente para
+-- gastar de manhã uma quota que o Google ainda contava como de ontem.
+-- Ver publish/quota.py.
+CREATE TABLE IF NOT EXISTS quota_api (
+    servico   TEXT NOT NULL,
+    dia       TEXT NOT NULL,
+    unidades  INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (servico, dia)
+);
+
+-- Credenciais que EXPIRAM e se renovam sozinhas — hoje, o token de longa
+-- duração do Instagram (60 dias).
+--
+-- Não vai no .env com o resto das chaves porque não é constante: o valor muda
+-- em runtime, e um segredo que o programa reescreve não cabe num arquivo que
+-- o humano edita. As chaves fixas continuam no .env; aqui fica só o que gira.
+CREATE TABLE IF NOT EXISTS tokens (
+    servico       TEXT PRIMARY KEY,
+    token         TEXT NOT NULL,
+    expira_em     TEXT,
+    atualizado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
