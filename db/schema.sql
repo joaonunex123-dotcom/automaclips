@@ -14,9 +14,9 @@
 --                   humano ler o log e para ordenar eventos da mesma máquina;
 --                   nunca entra em cálculo.
 --
--- Este arquivo cobre a etapa 1 (sourcing + fila). As tabelas de clips
--- recortados e de `resultados` (analytics) entram nas etapas 2 e 7, quando
--- houver código que as escreva — schema adiantado é schema adivinhado.
+-- Este arquivo cobre as etapas 1 (sourcing + fila) e 2 (pipeline). A tabela
+-- `resultados` (analytics) entra na etapa 7, quando houver código que a
+-- escreva — schema adiantado é schema adivinhado.
 
 -- Um vídeo-FONTE descoberto num canal monitorado. Não é o clip cortado: é o
 -- material bruto de onde os clips da etapa 2 vão sair.
@@ -116,3 +116,82 @@ BEGIN
     SET atualizado_em = datetime('now', 'localtime')
     WHERE id = NEW.id;
 END;
+
+-- ============================================================================
+-- Etapa 2 — pipeline (download -> transcrição -> highlight -> seleção)
+-- ============================================================================
+
+-- Artefatos de mídia de um vídeo-fonte. Tabela SEPARADA de fila_clips, e não
+-- colunas novas lá, por dois motivos:
+--   1. mantém este schema puramente aditivo — só CREATE TABLE IF NOT EXISTS,
+--      nenhum ALTER TABLE, então aplicar sobre um banco da etapa 1 continua
+--      sendo inofensivo e não exige um sistema de migração ainda;
+--   2. a relação é 1:1 mas OPCIONAL: a maioria das linhas de fila_clips nunca
+--      será baixada (ficou abaixo do limiar), e não faz sentido carregar
+--      quatro colunas vazias em todas elas.
+--
+-- Os caminhos são absolutos e apontam para fora do git (ver .gitignore). Vazio
+-- = etapa ainda não rodou; o pipeline usa isso para saber onde retomar depois
+-- de uma falha, em vez de refazer o download.
+CREATE TABLE IF NOT EXISTS midia (
+    fila_clip_id     INTEGER PRIMARY KEY REFERENCES fila_clips(id),
+    video_path       TEXT NOT NULL DEFAULT '',
+    audio_path       TEXT NOT NULL DEFAULT '',
+    transcricao_path TEXT NOT NULL DEFAULT '',
+    -- Duração medida no arquivo baixado. Pode divergir de fila_clips.duracao_s,
+    -- que veio da API: é ESTA que vale para recortar, porque é a do arquivo que
+    -- o ffmpeg vai cortar.
+    duracao_real_s   REAL NOT NULL DEFAULT 0,
+    baixado_em       TEXT,
+    transcrito_em    TEXT
+);
+
+-- Um trecho candidato a virar clip vertical. Sai do highlight_detect (Claude
+-- sobre a transcrição) e é confirmado contra os picos de energia do áudio.
+CREATE TABLE IF NOT EXISTS clips (
+    id           INTEGER PRIMARY KEY,
+    fila_clip_id INTEGER NOT NULL REFERENCES fila_clips(id),
+
+    -- Offsets em segundos dentro do vídeo-FONTE, não do clip.
+    inicio_s     REAL NOT NULL,
+    fim_s        REAL NOT NULL,
+
+    -- Nota do Claude, 0–10 (ver pipeline/highlight_detect.py). Escala de dez
+    -- em vez de 0–1 porque LLM pontua de forma mais estável e mais separável
+    -- numa faixa inteira pequena do que numa fração decimal.
+    score_claude REAL NOT NULL,
+    -- Justificativa em texto livre. Não participa de nenhum cálculo: existe
+    -- para o humano auditar por que um trecho entrou, que é a única forma de
+    -- calibrar o prompt sem adivinhar.
+    motivo       TEXT NOT NULL DEFAULT '',
+    -- Frase de abertura extraída pelo Claude, usada na intro de 1 s da etapa 3.
+    -- Pedida JUNTO com o trecho porque aqui a transcrição inteira já está no
+    -- contexto — extraí-la depois custaria uma segunda chamada à API por clip.
+    hook_text    TEXT NOT NULL DEFAULT '',
+
+    -- Confirmação por áudio: quantos picos de energia (librosa) caem dentro do
+    -- trecho, e o score depois de aplicado o fator derivado deles
+    -- (pipeline/select_clips.py). É score_final que ordena a fila de edição.
+    picos_energia INTEGER NOT NULL DEFAULT 0,
+    score_final   REAL NOT NULL,
+
+    -- 'selecionado' | 'descartado'. Trecho abaixo do limiar é GRAVADO como
+    -- descartado, não some: sem a linha não há como comparar o que o prompt
+    -- rejeitou contra o que performou, que é a matéria-prima da etapa 7.
+    status       TEXT NOT NULL DEFAULT 'selecionado',
+    -- Por que foi descartado (limiar, sobreposição, duração). Vazio se entrou.
+    motivo_descarte TEXT NOT NULL DEFAULT '',
+
+    criado_em    TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+
+    -- Reprocessar o mesmo vídeo não pode duplicar trechos. O par
+    -- (vídeo, início) é a identidade do trecho: o Claude pode devolver um fim
+    -- ligeiramente diferente numa segunda passada, mas o mesmo início é o
+    -- mesmo momento do vídeo.
+    UNIQUE (fila_clip_id, inicio_s)
+);
+
+CREATE INDEX IF NOT EXISTS ix_clips_status_score
+    ON clips (status, score_final DESC);
+CREATE INDEX IF NOT EXISTS ix_clips_fila
+    ON clips (fila_clip_id);

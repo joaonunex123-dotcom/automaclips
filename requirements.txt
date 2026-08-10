@@ -1,7 +1,22 @@
-# Etapa 1 (sourcing + fila). As dependências pesadas de mídia — yt-dlp,
-# faster-whisper, librosa, moviepy/ffmpeg — entram nas etapas 2 e 3, quando
-# houver código que as use. Instalar antes só faria a suíte de testes carregar
-# meio gigabyte de wheel para testar uma divisão.
+# Etapa 1 — sourcing + fila.
 google-api-python-client>=2.100.0
 python-dotenv>=1.0.0
+
+# Etapa 2 — pipeline.
+#
+# Nenhuma destas é importada no topo de módulo: cada uma entra dentro da função
+# que a usa, para a suíte de testes rodar (e o resto do pipeline continuar
+# importável) numa máquina que não tenha meio gigabyte de wheel instalado.
+anthropic>=0.116.0
+yt-dlp>=2024.1.0
+faster-whisper>=1.0.0
+librosa>=0.10.0
+numpy>=1.24.0
+soundfile>=0.12.0
+
+# Fora do pip, obrigatório: **ffmpeg** no PATH. O yt-dlp o usa para juntar as
+# faixas de vídeo e áudio separadas do YouTube, e a extração do .wav é uma
+# chamada direta a ele.  Windows: winget install Gyan.FFmpeg
+
+# As dependências de edição (moviepy/ffmpeg-python) entram na etapa 3.
 pytest>=7.0.0

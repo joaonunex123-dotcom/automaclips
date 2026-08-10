@@ -30,6 +30,16 @@ STATUS_DESCOBERTO = "descoberto"            # passou no corte, aguarda a etapa 2
 STATUS_ABAIXO_DO_LIMIAR = "abaixo_do_limiar"  # pontuado, fora do threshold
 STATUS_IGNORADO = "ignorado"                # fora da faixa de duração/idade
 
+# Etapa 2 — pipeline. Cada um é o estado ALCANÇADO, não o em andamento: a
+# linha só sai de 'descoberto' quando o download terminou de verdade, então
+# uma queda no meio do processo deixa o vídeo no último ponto concluído e a
+# retomada sabe exatamente onde continuar.
+STATUS_BAIXADO = "baixado"
+STATUS_TRANSCRITO = "transcrito"
+STATUS_ANALISADO = "analisado"        # highlight_detect + seleção rodaram
+STATUS_SEM_CLIPS = "sem_clips"        # analisado, nenhum trecho passou no corte
+STATUS_FALHA = "falha"                # ver a coluna `erro`
+
 # Estados que a varredura pode reavaliar numa passada seguinte. Um vídeo que
 # hoje está abaixo do corte pode engatar amanhã; um que já entrou em
 # processamento (etapas 2+) não pode voltar para trás, ou o pipeline
@@ -37,6 +47,10 @@ STATUS_IGNORADO = "ignorado"                # fora da faixa de duração/idade
 STATUS_REAVALIAVEIS = frozenset(
     {STATUS_DESCOBERTO, STATUS_ABAIXO_DO_LIMIAR, STATUS_IGNORADO}
 )
+
+# Vocabulário de `clips.status`.
+CLIP_SELECIONADO = "selecionado"
+CLIP_DESCARTADO = "descartado"
 
 # Espera máxima por um lock de escrita, em milissegundos.
 BUSY_TIMEOUT_MS = 5000
@@ -207,3 +221,120 @@ def marcar_erro(conn, fila_clip_id, mensagem):
         conn.execute(
             "UPDATE fila_clips SET erro = ? WHERE id = ?", (mensagem, fila_clip_id)
         )
+
+
+def definir_status(conn, fila_clip_id, status, erro=None):
+    """Move o vídeo de estado. `erro=None` limpa a falha anterior.
+
+    Limpar é o comportamento certo no caminho feliz: uma etapa que passou
+    invalida o motivo da falha anterior, e deixar o texto velho ali faria a
+    linha parecer quebrada para sempre. Para anotar a falha SEM mexer no
+    estado, use marcar_erro.
+    """
+    with escrita(conn):
+        conn.execute(
+            "UPDATE fila_clips SET status = ?, erro = ? WHERE id = ?",
+            (status, erro, fila_clip_id),
+        )
+
+
+# --- mídia --------------------------------------------------------------------
+
+CAMPOS_MIDIA = (
+    "video_path",
+    "audio_path",
+    "transcricao_path",
+    "duracao_real_s",
+    "baixado_em",
+    "transcrito_em",
+)
+
+
+def midia(conn, fila_clip_id):
+    """A linha de `midia` deste vídeo, ou None se nada foi baixado ainda."""
+    return conn.execute(
+        "SELECT * FROM midia WHERE fila_clip_id = ?", (fila_clip_id,)
+    ).fetchone()
+
+
+def registrar_midia(conn, fila_clip_id, **campos):
+    """Grava/atualiza APENAS os campos informados.
+
+    Parcial de propósito: transcribe.py grava transcricao_path sem saber (nem
+    precisar saber) o video_path que download.py gravou antes. Um upsert de
+    linha inteira apagaria o trabalho da etapa anterior a cada chamada.
+    """
+    desconhecidos = set(campos) - set(CAMPOS_MIDIA)
+    if desconhecidos:
+        raise ValueError(f"campos de mídia desconhecidos: {sorted(desconhecidos)}")
+    with escrita(conn):
+        conn.execute(
+            "INSERT OR IGNORE INTO midia (fila_clip_id) VALUES (?)", (fila_clip_id,)
+        )
+        if campos:
+            atribuicoes = ", ".join(f"{nome} = ?" for nome in campos)
+            conn.execute(
+                f"UPDATE midia SET {atribuicoes} WHERE fila_clip_id = ?",
+                (*campos.values(), fila_clip_id),
+            )
+
+
+# --- clips --------------------------------------------------------------------
+
+def registrar_clips(conn, fila_clip_id, clips):
+    """Substitui os trechos deste vídeo pelos informados, numa transação só.
+
+    Substitui em vez de acumular: reprocessar um vídeo (prompt novo, few-shot
+    recalibrado na etapa 7) deve produzir a análise vigente, não a união de
+    todas as análises que já rodaram. O DELETE e os INSERTs vão juntos — uma
+    falha no meio deixaria o vídeo sem trecho nenhum.
+
+    Cada item é um dict: inicio_s, fim_s, score_claude, motivo, hook_text,
+    picos_energia, score_final, status, motivo_descarte.
+    """
+    with escrita(conn):
+        conn.execute("DELETE FROM clips WHERE fila_clip_id = ?", (fila_clip_id,))
+        for clip in clips:
+            conn.execute(
+                "INSERT INTO clips"
+                " (fila_clip_id, inicio_s, fim_s, score_claude, motivo, hook_text,"
+                "  picos_energia, score_final, status, motivo_descarte)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    fila_clip_id,
+                    clip["inicio_s"],
+                    clip["fim_s"],
+                    clip["score_claude"],
+                    clip.get("motivo", ""),
+                    clip.get("hook_text", ""),
+                    clip.get("picos_energia", 0),
+                    clip["score_final"],
+                    clip.get("status", CLIP_SELECIONADO),
+                    clip.get("motivo_descarte", ""),
+                ),
+            )
+
+
+def clips_do_video(conn, fila_clip_id, status=None):
+    """Trechos de um vídeo, do melhor score_final para o pior."""
+    sql = "SELECT * FROM clips WHERE fila_clip_id = ?"
+    parametros = [fila_clip_id]
+    if status is not None:
+        sql += " AND status = ?"
+        parametros.append(status)
+    sql += " ORDER BY score_final DESC, inicio_s"
+    return conn.execute(sql, parametros).fetchall()
+
+
+def listar_clips(conn, status=CLIP_SELECIONADO, limite=None):
+    """Fila de edição: os melhores trechos de todos os vídeos, juntos."""
+    sql = (
+        "SELECT c.*, f.video_id, f.titulo, f.canal_nome"
+        " FROM clips c JOIN fila_clips f ON f.id = c.fila_clip_id"
+        " WHERE c.status = ? ORDER BY c.score_final DESC, c.id"
+    )
+    parametros = [status]
+    if limite is not None:
+        sql += " LIMIT ?"
+        parametros.append(limite)
+    return conn.execute(sql, parametros).fetchall()

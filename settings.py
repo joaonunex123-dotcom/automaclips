@@ -116,3 +116,116 @@ IDADE_MINIMA_HORAS = _float("SOURCING_IDADE_MINIMA_HORAS", 1.0)
 #           etapa 2 manda a transcrição inteira num prompt só.
 DURACAO_MINIMA_S = _int("SOURCING_DURACAO_MINIMA_S", 180)
 DURACAO_MAXIMA_S = _int("SOURCING_DURACAO_MAXIMA_S", 14400)
+
+# --- pipeline: caminhos de mídia ----------------------------------------------
+#
+# Fora do git (ver .gitignore): são gigabytes, e tudo aqui é reconstruível a
+# partir da fila.
+DOWNLOADS_DIR = _caminho("CLIPS_DOWNLOADS_DIR", os.path.join(_BASE_DIR, "downloads"))
+TRANSCRICOES_DIR = _caminho(
+    "CLIPS_TRANSCRICOES_DIR", os.path.join(_BASE_DIR, "downloads", "transcricoes")
+)
+
+# --- pipeline: download -------------------------------------------------------
+
+# Seletor de formato do yt-dlp. Teto de 1080p: o clip final é vertical e
+# recortado, então resolução acima disso é banda e disco gastos num pixel que
+# nunca chega ao vídeo publicado.
+YTDLP_FORMATO = _caminho(
+    "YTDLP_FORMATO", "bestvideo[height<=1080]+bestaudio/best[height<=1080]"
+)
+
+# Áudio extraído para transcrição e análise de energia. 16 kHz mono é o que o
+# Whisper consome internamente — entregar já nesse formato evita uma
+# reamostragem por execução, e serve igualmente bem ao librosa.
+AUDIO_SAMPLE_RATE = _int("CLIPS_AUDIO_SAMPLE_RATE", 16000)
+
+# Vídeos processados por execução do pipeline. Teto existe para uma fila
+# grande não virar uma execução de horas sem checkpoint — cada vídeo é
+# commitado ao terminar, então a execução seguinte continua de onde parou.
+PIPELINE_MAX_VIDEOS = _int("PIPELINE_MAX_VIDEOS", 5)
+
+# --- pipeline: transcrição ----------------------------------------------------
+#
+# faster-whisper. 'small' equilibra qualidade e tempo em CPU; 'medium'/'large-v3'
+# valem a pena com GPU (WHISPER_DEVICE=cuda).
+WHISPER_MODELO = _caminho("WHISPER_MODELO", "small")
+WHISPER_DEVICE = _caminho("WHISPER_DEVICE", "cpu")
+# int8 é o que torna CPU viável; com cuda, use float16.
+WHISPER_COMPUTE_TYPE = _caminho("WHISPER_COMPUTE_TYPE", "int8")
+# Vazio = detecção automática por áudio. Fixar o idioma quando todos os canais
+# monitorados falam a mesma língua economiza a passada de detecção e evita o
+# erro clássico de um trecho musical ser detectado como outro idioma.
+WHISPER_IDIOMA = _caminho("WHISPER_IDIOMA", "")
+
+# --- pipeline: highlight_detect (Claude) --------------------------------------
+
+# Ver docs/ e pipeline/highlight_detect.py. Opus 5 tem contexto de 1M, o que
+# cobre a transcrição inteira de um vídeo longo num prompt só — que é o que o
+# spec pede (nada de janela deslizante perdendo o fio da conversa).
+CLAUDE_MODELO = _caminho("CLAUDE_MODELO", "claude-opus-5")
+
+# low | medium | high | xhigh | max. 'high' é o default da API e o piso
+# recomendado para trabalho sensível a julgamento — escolher trecho viral é
+# exatamente isso. Vale varrer para baixo depois de ter clips medidos.
+CLAUDE_EFFORT = _caminho("CLAUDE_EFFORT", "high")
+
+# Teto de saída. A resposta é um JSON de N trechos (pequeno), mas no Opus 5 o
+# max_tokens limita raciocínio + texto JUNTOS: apertá-lo trunca a resposta no
+# meio do raciocínio e não sobra JSON nenhum.
+CLAUDE_MAX_TOKENS = _int("CLAUDE_MAX_TOKENS", 16000)
+
+# Retentativas do SDK para 429/5xx/erro de conexão (o default do SDK é 2).
+CLAUDE_MAX_RETRIES = _int("CLAUDE_MAX_RETRIES", 3)
+
+# Fallback server-side: se os classificadores de segurança recusarem o pedido,
+# a API refaz a chamada num modelo de fallback dentro da mesma requisição, em
+# vez de devolver a recusa. Transcrição de canal aberto é conteúdo que não
+# controlamos — a recusa é rara, mas quando acontece derrubaria o vídeo inteiro
+# por algo que ninguém escolheu. Desligue com CLAUDE_FALLBACKS=0 se o beta
+# causar problema.
+CLAUDE_FALLBACKS = _bool("CLAUDE_FALLBACKS", True)
+
+# Quantos trechos pedir por vídeo. Pedir mais do que se pretende usar é
+# deliberado: o corte por threshold e a resolução de sobreposição em
+# select_clips descartam parte, e é melhor descartar do que ficar sem.
+CLIPS_POR_VIDEO = _int("CLIPS_POR_VIDEO", 8)
+
+# Faixa de duração do TRECHO (não do vídeo-fonte), em segundos.
+CLIP_DURACAO_MINIMA_S = _float("CLIP_DURACAO_MINIMA_S", 30.0)
+CLIP_DURACAO_MAXIMA_S = _float("CLIP_DURACAO_MAXIMA_S", 60.0)
+
+# Corte do score_final (escala 0–10). Trecho abaixo é gravado como descartado.
+CLIP_SCORE_THRESHOLD = _float("CLIP_SCORE_THRESHOLD", 6.0)
+
+# Guarda de custo: transcrição acima disto não é enviada ao Claude. Um podcast
+# de 4 h dá ~50k tokens e passa folgado; o teto existe para o caso patológico
+# (legenda automática duplicada, live de 12 h) não virar uma chamada cara sem
+# ninguém decidir isso.
+TRANSCRICAO_MAX_TOKENS = _int("TRANSCRICAO_MAX_TOKENS", 200000)
+
+# --- pipeline: energia de áudio (confirmação dos trechos) ---------------------
+
+# Janela do RMS, em segundos. 0,25 s captura a dinâmica de fala e reação sem
+# transformar cada sílaba num pico.
+ENERGIA_JANELA_S = _float("ENERGIA_JANELA_S", 0.25)
+
+# Um quadro é pico se seu RMS ficar acima deste percentil do vídeo inteiro. É
+# relativo de propósito: canal com áudio comprimido e canal com faixa dinâmica
+# larga não compartilham um limiar absoluto.
+ENERGIA_PERCENTIL = _float("ENERGIA_PERCENTIL", 92.0)
+
+# Distância mínima entre dois picos. Sem isso, uma única gargalhada vira vinte
+# picos e a densidade deixa de medir quantos MOMENTOS o trecho tem.
+ENERGIA_DISTANCIA_MINIMA_S = _float("ENERGIA_DISTANCIA_MINIMA_S", 1.5)
+
+# Fator aplicado ao score do Claude conforme a densidade de picos no trecho
+# (ver pipeline/select_clips.fator_energia). O mínimo é uma PENALIDADE, não um
+# veto: trecho sem pico nenhum costuma ser fala parada, mas às vezes é uma
+# revelação em voz baixa — perder 30% do score deixa um trecho excelente ainda
+# competitivo, um veto o mataria.
+FATOR_ENERGIA_MIN = _float("FATOR_ENERGIA_MIN", 0.70)
+FATOR_ENERGIA_MAX = _float("FATOR_ENERGIA_MAX", 1.15)
+
+# Densidade (picos por minuto) a partir da qual o fator satura em MAX.
+DENSIDADE_PICOS_PLENA = _float("DENSIDADE_PICOS_PLENA", 4.0)

@@ -4,7 +4,9 @@ Nenhum teste toca rede, disco do projeto ou o clips.db real: o banco vai para
 um tmp_path por teste, e a API do YouTube entra por duplo. É o que permite
 rodar a suíte inteira sem chave de API e sem quota.
 """
+import json
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -123,3 +125,121 @@ class ClienteFalso:
 @pytest.fixture
 def cliente_falso():
     return ClienteFalso
+
+
+# --- etapa 2: pipeline --------------------------------------------------------
+
+class _Bloco:
+    def __init__(self, tipo, texto=None):
+        self.type = tipo
+        self.text = texto
+
+
+class _Mensagem:
+    def __init__(self, content, stop_reason="end_turn", stop_details=None):
+        self.content = content
+        self.stop_reason = stop_reason
+        self.stop_details = stop_details
+
+
+class _Stream:
+    """Duplo do context manager de streaming do SDK."""
+
+    def __init__(self, mensagem):
+        self._mensagem = mensagem
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def get_final_message(self):
+        return self._mensagem
+
+
+class ClienteClaudeFalso:
+    """Duplo do cliente da Anthropic, com as duas superfícies que usamos.
+
+    Registra os kwargs de cada chamada para que os testes possam afirmar sobre
+    o formato da requisição — onde o cache_control caiu, se o beta de fallback
+    foi enviado — sem rede e sem chave de API.
+    """
+
+    def __init__(self, trechos=None, stop_reason="end_turn", input_tokens=1000,
+                 texto=None, blocos=None, stop_details=None):
+        if blocos is not None:
+            content = blocos
+        elif texto is not None:
+            content = [_Bloco("text", texto)]
+        else:
+            content = [
+                _Bloco("text", json.dumps({"trechos": trechos if trechos is not None else []}))
+            ]
+        self._mensagem = _Mensagem(content, stop_reason, stop_details)
+        self._input_tokens = input_tokens
+        self.chamadas = []
+        self.contagens = []
+
+        self.messages = SimpleNamespace(
+            count_tokens=self._count_tokens,
+            stream=lambda **kw: self._stream("padrao", kw),
+        )
+        self.beta = SimpleNamespace(
+            messages=SimpleNamespace(stream=lambda **kw: self._stream("beta", kw))
+        )
+
+    def _count_tokens(self, **kwargs):
+        self.contagens.append(kwargs)
+        return SimpleNamespace(input_tokens=self._input_tokens)
+
+    def _stream(self, superficie, kwargs):
+        self.chamadas.append({"superficie": superficie, **kwargs})
+        return _Stream(self._mensagem)
+
+
+@pytest.fixture
+def cliente_claude():
+    return ClienteClaudeFalso
+
+
+@pytest.fixture
+def bloco():
+    """Constrói blocos de conteúdo avulsos (para testar resposta com fallback)."""
+    return _Bloco
+
+
+@pytest.fixture
+def transcricao():
+    """transcricao(*(inicio, fim, texto)) -> dict no formato do .json."""
+    def _fn(*falas, idioma="pt", duracao_s=600.0):
+        segmentos = [
+            {
+                "inicio": float(i),
+                "fim": float(f),
+                "texto": t,
+                "palavras": [
+                    {"inicio": float(i), "fim": float(f), "palavra": p}
+                    for p in t.split()
+                ],
+            }
+            for i, f, t in falas
+        ]
+        return {"idioma": idioma, "duracao_s": duracao_s, "segmentos": segmentos}
+    return _fn
+
+
+@pytest.fixture
+def trecho():
+    """trecho(**overrides) -> dict no formato que highlight_detect devolve."""
+    def _fn(**kwargs):
+        base = {
+            "inicio_s": 100.0,
+            "fim_s": 145.0,
+            "score_claude": 8.0,
+            "motivo": "conta a história e fecha na virada",
+            "hook_text": "ele nunca contou isso",
+        }
+        base.update(kwargs)
+        return base
+    return _fn

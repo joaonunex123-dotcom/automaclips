@@ -264,3 +264,154 @@ def test_foreign_key_de_observacao_e_aplicada(conn):
         conn.execute(
             "INSERT INTO observacoes_video (fila_clip_id, views) VALUES (12345, 1)"
         )
+
+
+# --- etapa 2: mídia e clips ---------------------------------------------------
+
+@pytest.fixture
+def clip_id(conn, video):
+    return repositorio.registrar_observacao(
+        conn, video(), views=1000, ganho=1000, score=250.0,
+        status=repositorio.STATUS_DESCOBERTO,
+    )
+
+
+def test_definir_status_move_e_limpa_o_erro(conn, clip_id):
+    repositorio.marcar_erro(conn, clip_id, "download falhou")
+    repositorio.definir_status(conn, clip_id, repositorio.STATUS_BAIXADO)
+
+    linha = repositorio.buscar_video(conn, "youtube", "vid1")
+    assert linha["status"] == repositorio.STATUS_BAIXADO
+    # Uma etapa que passou invalida o motivo da falha anterior; deixá-lo ali
+    # faria a linha parecer quebrada para sempre.
+    assert linha["erro"] is None
+
+
+def test_definir_status_com_erro_registra_os_dois(conn, clip_id):
+    repositorio.definir_status(
+        conn, clip_id, repositorio.STATUS_FALHA, erro="ffmpeg morreu"
+    )
+    linha = repositorio.buscar_video(conn, "youtube", "vid1")
+    assert linha["status"] == repositorio.STATUS_FALHA
+    assert linha["erro"] == "ffmpeg morreu"
+
+
+def test_midia_ausente_e_none(conn, clip_id):
+    assert repositorio.midia(conn, clip_id) is None
+
+
+def test_registrar_midia_e_parcial(conn, clip_id):
+    # transcribe.py grava transcricao_path sem saber o video_path que
+    # download.py gravou antes; um upsert de linha inteira apagaria aquele.
+    repositorio.registrar_midia(
+        conn, clip_id, video_path="/v/vid1.mp4", audio_path="/v/vid1.wav"
+    )
+    repositorio.registrar_midia(conn, clip_id, transcricao_path="/t/vid1.json")
+
+    midia = repositorio.midia(conn, clip_id)
+    assert midia["video_path"] == "/v/vid1.mp4"
+    assert midia["audio_path"] == "/v/vid1.wav"
+    assert midia["transcricao_path"] == "/t/vid1.json"
+
+
+def test_registrar_midia_sem_campos_so_cria_a_linha(conn, clip_id):
+    repositorio.registrar_midia(conn, clip_id)
+    assert repositorio.midia(conn, clip_id)["video_path"] == ""
+
+
+def test_campo_de_midia_desconhecido_e_recusado(conn, clip_id):
+    # Sem a validação, um typo viraria SQL malformado ou coluna criada por
+    # engano em vez de erro na hora.
+    with pytest.raises(ValueError, match="desconhecidos"):
+        repositorio.registrar_midia(conn, clip_id, vidoe_path="/typo.mp4")
+
+
+def _clip(**kwargs):
+    base = {
+        "inicio_s": 100.0, "fim_s": 145.0, "score_claude": 8.0,
+        "motivo": "fecha na virada", "hook_text": "ele nunca contou isso",
+        "picos_energia": 3, "score_final": 8.8,
+    }
+    base.update(kwargs)
+    return base
+
+
+def test_registrar_clips_grava_o_trecho_inteiro(conn, clip_id):
+    repositorio.registrar_clips(conn, clip_id, [_clip()])
+    clip = repositorio.clips_do_video(conn, clip_id)[0]
+
+    assert clip["inicio_s"] == 100.0
+    assert clip["score_final"] == 8.8
+    assert clip["picos_energia"] == 3
+    assert clip["hook_text"] == "ele nunca contou isso"
+    assert clip["status"] == repositorio.CLIP_SELECIONADO
+
+
+def test_reprocessar_substitui_em_vez_de_acumular(conn, clip_id):
+    # Reprocessar com prompt novo (etapa 7) deve produzir a análise vigente,
+    # não a união de todas as análises que já rodaram.
+    repositorio.registrar_clips(conn, clip_id, [_clip(inicio_s=100.0)])
+    repositorio.registrar_clips(conn, clip_id, [_clip(inicio_s=300.0)])
+
+    clips = repositorio.clips_do_video(conn, clip_id)
+    assert [c["inicio_s"] for c in clips] == [300.0]
+
+
+def test_clips_de_videos_diferentes_nao_se_misturam(conn, clip_id, video):
+    outro = repositorio.registrar_observacao(
+        conn, video(video_id="vid2"), views=1, ganho=1, score=1.0,
+        status=repositorio.STATUS_DESCOBERTO,
+    )
+    repositorio.registrar_clips(conn, clip_id, [_clip()])
+    repositorio.registrar_clips(conn, outro, [_clip(inicio_s=50.0)])
+
+    assert len(repositorio.clips_do_video(conn, clip_id)) == 1
+    assert len(repositorio.clips_do_video(conn, outro)) == 1
+
+
+def test_clips_do_video_filtra_por_status(conn, clip_id):
+    repositorio.registrar_clips(conn, clip_id, [
+        _clip(inicio_s=100.0),
+        _clip(inicio_s=300.0, score_final=1.0,
+              status=repositorio.CLIP_DESCARTADO, motivo_descarte="score baixo"),
+    ])
+    assert len(repositorio.clips_do_video(conn, clip_id)) == 2
+    selecionados = repositorio.clips_do_video(
+        conn, clip_id, status=repositorio.CLIP_SELECIONADO
+    )
+    assert [c["inicio_s"] for c in selecionados] == [100.0]
+
+
+def test_listar_clips_junta_os_videos_e_ordena(conn, clip_id, video):
+    outro = repositorio.registrar_observacao(
+        conn, video(video_id="vid2", titulo="Outro vídeo"), views=1, ganho=1,
+        score=1.0, status=repositorio.STATUS_DESCOBERTO,
+    )
+    repositorio.registrar_clips(conn, clip_id, [_clip(score_final=5.0)])
+    repositorio.registrar_clips(conn, outro, [_clip(score_final=9.5)])
+
+    fila = repositorio.listar_clips(conn)
+    assert [c["score_final"] for c in fila] == [9.5, 5.0]
+    # A junção traz o contexto do vídeo, que a etapa 4 usa no metadado.
+    assert fila[0]["titulo"] == "Outro vídeo"
+    assert fila[0]["video_id"] == "vid2"
+
+
+def test_listar_clips_respeita_o_limite(conn, clip_id):
+    repositorio.registrar_clips(conn, clip_id, [
+        _clip(inicio_s=float(i * 100), score_final=float(i)) for i in range(1, 5)
+    ])
+    assert len(repositorio.listar_clips(conn, limite=2)) == 2
+
+
+def test_unique_impede_dois_trechos_no_mesmo_instante(conn, clip_id):
+    with pytest.raises(sqlite3.IntegrityError):
+        repositorio.registrar_clips(conn, clip_id, [_clip(), _clip()])
+
+
+def test_foreign_key_de_clip_e_aplicada(conn):
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "INSERT INTO clips (fila_clip_id, inicio_s, fim_s, score_claude,"
+            " score_final) VALUES (12345, 0, 30, 8, 8)"
+        )
