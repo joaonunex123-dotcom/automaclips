@@ -1,0 +1,22 @@
+# Segredos — todas as chaves de API vivem aqui, nunca no código.
+.env
+
+# Banco: fonte de verdade em runtime, não artefato de código. Os arquivos
+# -wal/-shm são do WAL mode e mudam a cada escrita.
+*.db
+*.db-wal
+*.db-shm
+
+# Configuração operacional que o próprio sistema reescreve (analytics remove
+# canais de baixa performance). Versionado é o canais.exemplo.json.
+sourcing/canais.json
+
+# Mídia baixada e renderizada — pesada e reconstruível a partir da fila.
+downloads/
+render/
+clips/
+
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/

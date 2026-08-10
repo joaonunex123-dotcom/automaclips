@@ -1,0 +1,14 @@
+# Normaliza terminador de linha: todo texto entra no repositório em LF e sai
+# no checkout conforme o core.autocrlf de cada máquina. Sem isto, uma máquina
+# Windows (autocrlf=true, o padrão daqui) e uma Linux/Mac (autocrlf=input ou
+# false) gravam CRLF e LF misturados no mesmo repositório — e qualquer diff,
+# merge ou blame depois passa a carregar ruído de line-ending junto com a
+# mudança de verdade.
+* text=auto eol=lf
+
+# Binário: nunca normalizar nem diffar como texto.
+*.png binary
+*.jpg binary
+*.mp3 binary
+*.wav binary
+*.mp4 binary

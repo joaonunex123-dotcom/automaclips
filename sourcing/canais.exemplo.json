@@ -1,0 +1,20 @@
+{
+  "_comentario": [
+    "Copie para sourcing/canais.json e preencha com os canais monitorados.",
+    "O canais.json é gitignored porque o sistema o reescreve sozinho: a etapa 7",
+    "(analytics/recalibrate) marca ativo=false nos canais cujos clips",
+    "performam mal de forma consistente.",
+    "",
+    "id: o ID do canal no YouTube, começando em UC (não o @handle nem a URL",
+    "personalizada). Para descobrir: abra o canal, veja o código-fonte e",
+    "procure por \"channelId\", ou use a própria API em channels.list?forHandle=."
+  ],
+  "canais": [
+    {
+      "id": "UC_x5XG1OV2P6uZZ5FSM9Ttw",
+      "nome": "Google for Developers",
+      "plataforma": "youtube",
+      "ativo": true
+    }
+  ]
+}

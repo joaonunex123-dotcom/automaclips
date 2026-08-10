@@ -1,0 +1,7 @@
+# Etapa 1 (sourcing + fila). As dependências pesadas de mídia — yt-dlp,
+# faster-whisper, librosa, moviepy/ffmpeg — entram nas etapas 2 e 3, quando
+# houver código que as use. Instalar antes só faria a suíte de testes carregar
+# meio gigabyte de wheel para testar uma divisão.
+google-api-python-client>=2.100.0
+python-dotenv>=1.0.0
+pytest>=7.0.0
