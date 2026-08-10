@@ -52,9 +52,21 @@ PADRAO = {
         "contorno_espessura": 2, "sombra": 0, "margem_vertical": 60,
         "alinhamento": 8,
     },
+    "sfx": {
+        "ativo": False, "diretorio": "assets/sfx", "volume": 0.6,
+        "espacamento_minimo_s": 1.5, "maximo_por_clip": 8,
+        "eventos": {},
+        "na_abertura": True, "no_fim_do_hook": True,
+        "exclamacao_conta": True, "palavras_chave": [],
+    },
 }
 
 MODOS_REFRAME = ("corte", "desfoque")
+
+# Gatilhos que editing/sfx.py sabe posicionar. Um som com gatilho fora desta
+# lista é erro de configuração, não um som que simplesmente nunca toca: o
+# segundo modo de falha é invisível e só apareceria ao assistir o clip.
+GATILHOS_SFX = ("transicao", "pico", "palavra_chave")
 
 
 def _sem_comentarios(valor):
@@ -117,7 +129,41 @@ def validar(config):
 
     if config["watermark"]["ativo"] and not str(config["watermark"]["texto"]).strip():
         raise TemplateInvalido("watermark.ativo mas watermark.texto está vazio")
+
+    _validar_sfx(config["sfx"])
     return config
+
+
+def _validar_sfx(sfx):
+    for chave, minimo in (("volume", 0.0), ("espacamento_minimo_s", 0.0),
+                          ("maximo_por_clip", 0)):
+        valor = sfx.get(chave)
+        if isinstance(valor, bool) or not isinstance(valor, (int, float)):
+            raise TemplateInvalido(f"sfx.{chave} precisa ser número, veio {valor!r}")
+        if valor < minimo:
+            raise TemplateInvalido(f"sfx.{chave} precisa ser >= {minimo}, veio {valor}")
+
+    eventos = sfx.get("eventos")
+    if not isinstance(eventos, dict):
+        raise TemplateInvalido("sfx.eventos precisa ser um objeto")
+
+    for nome, evento in eventos.items():
+        if not isinstance(evento, dict):
+            raise TemplateInvalido(f"sfx.eventos.{nome} precisa ser um objeto")
+        if evento.get("gatilho") not in GATILHOS_SFX:
+            raise TemplateInvalido(
+                f"sfx.eventos.{nome}.gatilho precisa ser um de {GATILHOS_SFX}, "
+                f"veio {evento.get('gatilho')!r}"
+            )
+        if evento.get("ativo") and not str(evento.get("arquivo") or "").strip():
+            raise TemplateInvalido(f"sfx.eventos.{nome} está ativo mas sem arquivo")
+
+    if sfx.get("ativo") and not any(e.get("ativo") for e in eventos.values()):
+        raise TemplateInvalido(
+            "sfx.ativo mas nenhum evento está ativo — nada tocaria"
+        )
+    if not isinstance(sfx.get("palavras_chave"), list):
+        raise TemplateInvalido("sfx.palavras_chave precisa ser uma lista")
 
 
 def carregar(caminho=None):

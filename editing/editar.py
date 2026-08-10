@@ -24,6 +24,7 @@ import settings
 from db import repositorio
 from editing import legendas as legendas_mod
 from editing import render as render_mod
+from editing import sfx as sfx_mod
 from editing import template as template_mod
 from pipeline import transcribe as transcribe_mod
 
@@ -53,35 +54,57 @@ def _carregar_fontes(linha, carregar_transcricao):
     return video_path, carregar_transcricao(caminho_transcricao)
 
 
-def renderizar_clip(conn, linha, config, carregar_transcricao=None, renderizar=None,
-                    destino_dir=None):
+def renderizar_clip(conn, linha, config, biblioteca=None, carregar_transcricao=None,
+                    renderizar=None, destino_dir=None):
     """Produz o arquivo de um clip e registra o artefato. Devolve o caminho."""
     carregar_transcricao = carregar_transcricao or transcribe_mod.carregar
     renderizar = renderizar or render_mod.renderizar
 
     video_path, transcricao = _carregar_fontes(linha, carregar_transcricao)
     inicio, fim = float(linha["inicio_s"]), float(linha["fim_s"])
+    duracao = fim - inicio
 
-    ass_texto = legendas_mod.gerar_para_clip(
-        config, transcricao, inicio, fim, hook_text=linha["hook_text"] or ""
+    # As palavras são extraídas UMA vez e servem às duas coisas: a legenda
+    # word-by-word e a detecção de palavra-chave do SFX. Recalcular para o
+    # segundo uso convidaria os dois a divergirem.
+    palavras = legendas_mod.palavras_do_trecho(transcricao, inicio, fim)
+    ass_texto = legendas_mod.gerar_ass(
+        config, palavras, hook_text=linha["hook_text"] or "", duracao_s=duracao
+    )
+
+    sons = sfx_mod.planejar(
+        config, duracao,
+        picos=repositorio.picos_do_clip(conn, linha["id"]),
+        palavras=palavras,
+        biblioteca=biblioteca if biblioteca is not None else {},
     )
     nome = render_mod.nome_base(linha["video_id"], linha["id"])
 
     caminho = renderizar(
-        config, video_path, inicio, fim, ass_texto, nome, destino_dir=destino_dir
+        config, video_path, inicio, fim, ass_texto, nome,
+        destino_dir=destino_dir, sons=sons,
     )
     repositorio.registrar_render(
         conn, linha["id"], caminho,
         template_versao=str(config.get("versao", "")),
-        duracao_s=fim - inicio,
+        duracao_s=duracao,
     )
     return caminho
 
 
-def renderizar_fila(conn, limite=None, config=None, **injecoes):
+def renderizar_fila(conn, limite=None, config=None, biblioteca=None, **injecoes):
     """Renderiza a fila de edição. Devolve {'ok': n, 'falha': n}."""
     limite = settings.EDITING_MAX_CLIPS if limite is None else limite
     config = config if config is not None else template_mod.carregar()
+
+    # A biblioteca é conferida UMA vez, antes do primeiro render: um arquivo
+    # de efeito faltando é erro de configuração, e descobri-lo clip a clip
+    # produziria a fila inteira em 'falha' com a mesma mensagem repetida.
+    if biblioteca is None:
+        biblioteca = sfx_mod.carregar_biblioteca(config)
+    if biblioteca:
+        log.info("Efeitos carregados: %s.", ", ".join(sorted(biblioteca)))
+
     pendentes = repositorio.clips_para_renderizar(conn, limite=limite)
     log.info("%d clips pendentes de render (template versão %s).",
              len(pendentes), config.get("versao"))
@@ -89,7 +112,7 @@ def renderizar_fila(conn, limite=None, config=None, **injecoes):
     contagem = {"ok": 0, "falha": 0}
     for linha in pendentes:
         try:
-            renderizar_clip(conn, linha, config, **injecoes)
+            renderizar_clip(conn, linha, config, biblioteca=biblioteca, **injecoes)
         except Exception as e:
             # Amplo pelo mesmo motivo do pipeline: ffmpeg, disco e transcrição
             # corrompida levantam hierarquias sem nada em comum, e nenhuma
@@ -109,7 +132,8 @@ def _resumo(conn, contagem, config):
         f"  falhas        {contagem['falha']}",
         f"  (template versão {config.get('versao')}, "
         f"{config['saida']['largura']}x{config['saida']['altura']}, "
-        f"reframe {config['reframe']['modo']})",
+        f"reframe {config['reframe']['modo']}, "
+        f"sfx {'ligado' if config['sfx'].get('ativo') else 'desligado'})",
     ]
 
     pendentes = repositorio.clips_para_renderizar(conn)
@@ -152,6 +176,12 @@ def main(argv=None):
     conn = repositorio.conectar()
     try:
         contagem = renderizar_fila(conn, limite=args.limite, config=config)
+    except sfx_mod.ErroSFX as e:
+        # Erro de configuração, não de um clip: abortar é melhor do que
+        # renderizar a fila inteira sem os efeitos que o template mandava.
+        log.error("%s", e)
+        return 2
+    else:
         print(_resumo(conn, contagem, config))
     finally:
         conn.close()

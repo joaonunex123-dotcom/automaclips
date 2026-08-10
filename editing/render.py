@@ -98,31 +98,81 @@ def filtro_zoom(config, duracao_s):
     )
 
 
-def filtergraph(config, ass_nome, duracao_s):
-    """Grafo completo, terminando no rótulo [vout]."""
+def cadeia_audio(sons):
+    """Mistura os efeitos sobre o áudio original. '' quando não há efeito.
+
+    Cada som é uma ENTRADA separada do ffmpeg (`-i`), atrasada com `adelay`
+    até o instante planejado e atenuada pelo volume do template. Entradas de
+    verdade, e não filtros de geração, porque é o que permite usar os arquivos
+    de áudio que o usuário escolheu.
+
+    `normalize=0` no amix não é detalhe: sem ele o filtro divide o volume pelo
+    número de entradas, e a fala afunda um pouco a cada efeito acrescentado —
+    um clip com oito efeitos sairia com a voz na metade do volume, sem que
+    nada no template pedisse isso.
+    """
+    if not sons:
+        return ""
+
+    partes, rotulos = [], []
+    for i, som in enumerate(sons):
+        rotulo = f"[sfx{i}]"
+        atraso_ms = int(round(float(som["instante_s"]) * 1000))
+        # all=1 aplica o atraso a todos os canais: sem isso, um efeito estéreo
+        # sai com um canal adiantado.
+        partes.append(
+            f"[{i + 1}:a]adelay={atraso_ms}:all=1,volume={som['volume']}{rotulo}"
+        )
+        rotulos.append(rotulo)
+
+    entradas = "[0:a]" + "".join(rotulos)
+    partes.append(
+        f"{entradas}amix=inputs={len(sons) + 1}:duration=first:"
+        "dropout_transition=0:normalize=0[aout]"
+    )
+    return ";".join(partes)
+
+
+def filtergraph(config, ass_nome, duracao_s, sons=None):
+    """Grafo completo: vídeo em [vout], e áudio em [aout] quando há efeito."""
     grafo = filtro_reframe(config)
     zoom = filtro_zoom(config, duracao_s)
     grafo += zoom
     entrada = "[vz]" if zoom else "[vr]"
     grafo += f"{entrada}ass={ass_nome}[vout]"
+
+    audio = cadeia_audio(sons)
+    if audio:
+        grafo += ";" + audio
     return grafo
 
 
 def comando(config, video_path, inicio_s, duracao_s, ass_nome, saida_path,
-            ffmpeg="ffmpeg"):
+            ffmpeg="ffmpeg", sons=None):
     """Argumentos do ffmpeg, como lista. Função pura."""
     saida = config["saida"]
-    return [
+    argumentos = [
         ffmpeg, "-y",
         # -ss ANTES de -i: busca rápida. Como há recodificação, o corte sai
-        # exato mesmo assim (o accurate_seek é o padrão).
+        # exato mesmo assim (o accurate_seek é o padrão). Estas duas opções
+        # valem só para a entrada seguinte, então os efeitos abaixo não são
+        # cortados junto.
         "-ss", f"{inicio_s:.3f}",
         "-t", f"{duracao_s:.3f}",
         "-i", video_path,
-        "-filter_complex", filtergraph(config, ass_nome, duracao_s),
+    ]
+    for som in sons or []:
+        argumentos += ["-i", som["caminho"]]
+
+    argumentos += [
+        "-filter_complex", filtergraph(config, ass_nome, duracao_s, sons),
         "-map", "[vout]",
-        # O '?' torna o áudio opcional: vídeo mudo não pode derrubar o render.
-        "-map", "0:a?",
+    ]
+    # Com efeito, o áudio sai do amix. Sem efeito, o '?' torna a trilha
+    # opcional: vídeo mudo não pode derrubar o render.
+    argumentos += ["-map", "[aout]"] if sons else ["-map", "0:a?"]
+
+    argumentos += [
         "-c:v", str(saida["codec_video"]),
         "-preset", str(saida["preset"]),
         "-crf", str(int(saida["crf"])),
@@ -134,10 +184,11 @@ def comando(config, video_path, inicio_s, duracao_s, ass_nome, saida_path,
         "-movflags", "+faststart",
         saida_path,
     ]
+    return argumentos
 
 
 def renderizar(config, video_path, inicio_s, fim_s, ass_texto, nome, destino_dir=None,
-               executar=None, caminho_ffmpeg=None):
+               executar=None, caminho_ffmpeg=None, sons=None):
     """Escreve o .ass, roda o ffmpeg e devolve o caminho do .mp4."""
     from pipeline.download import _garantir_ffmpeg
 
@@ -156,7 +207,8 @@ def renderizar(config, video_path, inicio_s, fim_s, ass_texto, nome, destino_dir
     saida_path = os.path.join(destino_dir, f"{nome}.mp4")
     duracao = max(0.0, float(fim_s) - float(inicio_s))
     argumentos = comando(
-        config, video_path, inicio_s, duracao, ass_nome, saida_path, ffmpeg
+        config, video_path, inicio_s, duracao, ass_nome, saida_path, ffmpeg,
+        sons=sons,
     )
 
     # cwd no diretório do .ass: ver a docstring do módulo.

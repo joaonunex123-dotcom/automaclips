@@ -290,12 +290,14 @@ def registrar_clips(conn, fila_clip_id, clips):
     falha no meio deixaria o vídeo sem trecho nenhum.
 
     Cada item é um dict: inicio_s, fim_s, score_claude, motivo, hook_text,
-    picos_energia, score_final, status, motivo_descarte.
+    picos_energia, score_final, status, motivo_descarte, e opcionalmente
+    picos_instantes (lista de segundos relativos ao início do trecho, que a
+    etapa 4 usa para posicionar os efeitos sonoros).
     """
     with escrita(conn):
         conn.execute("DELETE FROM clips WHERE fila_clip_id = ?", (fila_clip_id,))
         for clip in clips:
-            conn.execute(
+            cursor = conn.execute(
                 "INSERT INTO clips"
                 " (fila_clip_id, inicio_s, fim_s, score_claude, motivo, hook_text,"
                 "  picos_energia, score_final, status, motivo_descarte)"
@@ -313,6 +315,23 @@ def registrar_clips(conn, fila_clip_id, clips):
                     clip.get("motivo_descarte", ""),
                 ),
             )
+            conn.executemany(
+                "INSERT INTO picos_clip (clip_id, instante_s) VALUES (?, ?)",
+                [(cursor.lastrowid, float(t))
+                 for t in (clip.get("picos_instantes") or [])],
+            )
+
+
+def picos_do_clip(conn, clip_id):
+    """Instantes dos picos deste trecho, relativos ao início dele."""
+    return [
+        float(linha[0])
+        for linha in conn.execute(
+            "SELECT instante_s FROM picos_clip WHERE clip_id = ?"
+            " ORDER BY instante_s",
+            (clip_id,),
+        ).fetchall()
+    ]
 
 
 def clips_do_video(conn, fila_clip_id, status=None):

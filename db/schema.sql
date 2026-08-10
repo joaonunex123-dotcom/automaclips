@@ -196,6 +196,29 @@ CREATE INDEX IF NOT EXISTS ix_clips_status_score
 CREATE INDEX IF NOT EXISTS ix_clips_fila
     ON clips (fila_clip_id);
 
+-- Instantes dos picos de energia DENTRO de cada trecho, relativos ao início
+-- dele.
+--
+-- `clips.picos_energia` guarda quantos são, que é tudo de que a seleção
+-- precisa; a etapa 4 precisa saber ONDE eles caem, para colocar o efeito
+-- sonoro em cima. Recalcular na hora do render custaria carregar o áudio
+-- inteiro do vídeo-fonte (quase um gigabyte, num podcast de quatro horas) uma
+-- vez por clip.
+--
+-- Guardados por CLIP e não por vídeo de propósito: um vídeo de quatro horas
+-- tem milhares de picos e só uns poucos minutos viram clip. Por clip são
+-- algumas dezenas de linhas, e são exatamente as que alguém vai usar.
+--
+-- ON DELETE CASCADE porque registrar_clips substitui os trechos de um vídeo a
+-- cada reprocessamento: sem o cascade, os picos do trecho antigo ficariam
+-- órfãos apontando para um clip que não existe mais.
+CREATE TABLE IF NOT EXISTS picos_clip (
+    id         INTEGER PRIMARY KEY,
+    clip_id    INTEGER NOT NULL REFERENCES clips(id) ON DELETE CASCADE,
+    instante_s REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_picos_clip ON picos_clip (clip_id, instante_s);
+
 -- Gasto com API paga, uma linha por chamada cobrada.
 --
 -- Existe porque o orçamento é pequeno e finito: sem o acumulado no banco, a

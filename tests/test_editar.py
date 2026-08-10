@@ -29,6 +29,8 @@ def clip_pronto(conn, video, tmp_path, transcricao):
             "inicio_s": 100.0, "fim_s": 145.0, "score_claude": 9.0,
             "motivo": "fecha na virada", "hook_text": "ele nunca contou isso",
             "picos_energia": 3, "score_final": 9.5,
+            # Relativos ao início do trecho, como a etapa 2 grava.
+            "picos_instantes": [12.0, 25.0, 38.0],
         }])
         return repositorio.clips_do_video(conn, fila_id)[0]["id"]
 
@@ -42,10 +44,10 @@ def render_falso():
     registro = []
 
     def renderizar(config, video_path, inicio, fim, ass_texto, nome,
-                   destino_dir=None):
+                   destino_dir=None, sons=None):
         registro.append({
             "video_path": video_path, "inicio": inicio, "fim": fim,
-            "ass": ass_texto, "nome": nome,
+            "ass": ass_texto, "nome": nome, "sons": sons or [],
         })
         return f"/render/{nome}.mp4"
 
@@ -198,7 +200,7 @@ def test_falha_num_clip_nao_derruba_os_outros(conn, template, clip_pronto):
     tentativas = []
 
     def renderizar(config, video_path, inicio, fim, ass_texto, nome,
-                   destino_dir=None):
+                   destino_dir=None, sons=None):
         tentativas.append(nome)
         if nome.startswith("quebrado"):
             raise RuntimeError("codec indisponível")
@@ -210,6 +212,79 @@ def test_falha_num_clip_nao_derruba_os_outros(conn, template, clip_pronto):
     )
     assert contagem == {"ok": 1, "falha": 1}
     assert len(tentativas) == 2
+
+
+# --- efeitos sonoros ----------------------------------------------------------
+
+def test_sfx_desligado_nao_manda_som(conn, template, clip_pronto, render_falso):
+    registro, renderizar = render_falso
+    clip_pronto()
+
+    editar.renderizar_fila(
+        conn, config=template, renderizar=renderizar,
+        carregar_transcricao=lambda c: clip_pronto.transcricao(),
+    )
+    assert registro[0]["sons"] == []
+
+
+def test_sfx_usa_os_picos_gravados_na_etapa_2(conn, template, clip_pronto,
+                                              render_falso):
+    import copy
+
+    config = copy.deepcopy(template)
+    config["sfx"].update(ativo=True, espacamento_minimo_s=0.0,
+                         na_abertura=False, no_fim_do_hook=False)
+    registro, renderizar = render_falso
+    clip_pronto()
+
+    editar.renderizar_fila(
+        conn, config=config, renderizar=renderizar,
+        biblioteca={"ding": "/sfx/ding.wav"},
+        carregar_transcricao=lambda c: clip_pronto.transcricao(),
+    )
+    instantes = [s["instante_s"] for s in registro[0]["sons"]]
+    assert instantes == [12.0, 25.0, 38.0]
+
+
+def test_sfx_le_as_palavras_da_mesma_extracao_da_legenda(conn, template,
+                                                         clip_pronto, render_falso):
+    # As palavras são extraídas uma vez e servem à legenda e ao SFX; recalcular
+    # para o segundo uso convidaria os dois a divergirem.
+    import copy
+
+    config = copy.deepcopy(template)
+    config["sfx"].update(
+        ativo=True, espacamento_minimo_s=0.0, na_abertura=False,
+        no_fim_do_hook=False, exclamacao_conta=False, palavras_chave=["virada"],
+    )
+    config["sfx"]["eventos"]["ding"]["ativo"] = False
+    registro, renderizar = render_falso
+    clip_pronto()
+
+    editar.renderizar_fila(
+        conn, config=config, renderizar=renderizar,
+        biblioteca={"pop": "/sfx/pop.wav"},
+        carregar_transcricao=lambda c: clip_pronto.transcricao(),
+    )
+    assert [s["caminho"] for s in registro[0]["sons"]] == ["/sfx/pop.wav"]
+
+
+def test_biblioteca_e_conferida_uma_vez_antes_do_primeiro_render(
+    conn, template, clip_pronto, render_falso
+):
+    # Descobrir clip a clip produziria a fila inteira em 'falha' com a mesma
+    # mensagem repetida.
+    import copy
+
+    config = copy.deepcopy(template)
+    config["sfx"]["ativo"] = True
+    config["sfx"]["diretorio"] = "/nao/existe"
+    _, renderizar = render_falso
+    clip_pronto()
+
+    from editing import sfx as sfx_mod
+    with pytest.raises(sfx_mod.ErroSFX):
+        editar.renderizar_fila(conn, config=config, renderizar=renderizar)
 
 
 # --- resumo -------------------------------------------------------------------

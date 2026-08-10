@@ -186,6 +186,87 @@ def test_video_fonte_ausente_falha_antes_do_ffmpeg(tmp_path, template, ffmpeg_fa
         )
 
 
+# --- efeitos sonoros ----------------------------------------------------------
+
+SONS = [
+    {"instante_s": 0.0, "caminho": "/sfx/whoosh.wav", "volume": 0.7},
+    {"instante_s": 12.5, "caminho": "/sfx/ding.wav", "volume": 0.5},
+]
+
+
+def test_sem_sons_a_cadeia_de_audio_e_vazia():
+    assert render.cadeia_audio([]) == ""
+    assert render.cadeia_audio(None) == ""
+
+
+def test_cada_som_vira_uma_entrada_atrasada():
+    cadeia = render.cadeia_audio(SONS)
+    assert "[1:a]adelay=0:all=1,volume=0.7[sfx0]" in cadeia
+    assert "[2:a]adelay=12500:all=1,volume=0.5[sfx1]" in cadeia
+
+
+def test_amix_nao_normaliza():
+    # Sem normalize=0 o amix divide o volume pelo número de entradas, e a fala
+    # afunda um pouco a cada efeito acrescentado.
+    cadeia = render.cadeia_audio(SONS)
+    assert "normalize=0" in cadeia
+    assert "amix=inputs=3" in cadeia          # original + 2 efeitos
+    assert cadeia.endswith("[aout]")
+
+
+def test_atraso_vale_para_todos_os_canais():
+    # Sem all=1, um efeito estéreo sai com um canal adiantado.
+    assert ":all=1" in render.cadeia_audio(SONS)
+
+
+def test_grafo_ganha_a_cadeia_de_audio(template):
+    grafo = render.filtergraph(template, "c.ass", 45.0, sons=SONS)
+    assert "[vout]" in grafo and "[aout]" in grafo
+
+
+def test_sons_viram_entradas_depois_do_video(template):
+    cmd = render.comando(template, "/v/a.mp4", 100.0, 45.0, "c.ass", "/r/c.mp4",
+                         sons=SONS)
+    entradas = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-i"]
+    assert entradas == ["/v/a.mp4", "/sfx/whoosh.wav", "/sfx/ding.wav"]
+
+
+def test_corte_nao_afeta_as_entradas_de_efeito(template):
+    # -ss e -t valem só para a entrada seguinte; se valessem para todas, os
+    # efeitos seriam cortados junto e sumiriam.
+    cmd = render.comando(template, "/v/a.mp4", 100.0, 45.0, "c.ass", "/r/c.mp4",
+                         sons=SONS)
+    assert cmd.index("-ss") < cmd.index("-i")
+    assert cmd.index("-t") < cmd.index("-i")
+    # Não há um segundo -ss antes das outras entradas.
+    assert cmd.count("-ss") == 1
+
+
+def test_com_efeito_o_audio_vem_do_amix(template):
+    cmd = render.comando(template, "/v/a.mp4", 0, 45, "c.ass", "/r/c.mp4",
+                         sons=SONS)
+    assert "[aout]" in cmd
+    assert "0:a?" not in cmd
+
+
+def test_sem_efeito_o_audio_continua_opcional(template):
+    cmd = render.comando(template, "/v/a.mp4", 0, 45, "c.ass", "/r/c.mp4")
+    assert "0:a?" in cmd
+    assert "[aout]" not in cmd
+
+
+def test_renderizar_repassa_os_sons(tmp_path, template, executar_ok, ffmpeg_fake):
+    video = tmp_path / "fonte.mp4"
+    video.write_text("video", encoding="utf-8")
+    registro = []
+
+    render.renderizar(
+        template, str(video), 0, 45, "ass", "c", destino_dir=str(tmp_path / "r"),
+        executar=executar_ok(registro), caminho_ffmpeg=ffmpeg_fake, sons=SONS,
+    )
+    assert "/sfx/ding.wav" in registro[0]["comando"]
+
+
 def test_falha_do_ffmpeg_reporta_a_ultima_linha(
     tmp_path, template, executar_ok, ffmpeg_fake
 ):

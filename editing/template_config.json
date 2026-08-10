@@ -96,13 +96,51 @@
 
   "sfx": {
     "_comentario": [
-      "Etapa 4. As chaves existem desde já para o timing dos efeitos nascer",
-      "em configuração, e não cravado no código de edição."
+      "Efeitos sonoros. DESLIGADO por padrão porque depende de arquivos de",
+      "áudio que não vêm no repositório — ver assets/sfx/README.md. Ligar sem",
+      "os arquivos falha na carga do template, de propósito: melhor descobrir",
+      "antes de renderizar do que sair um clip mudo de efeito.",
+      "",
+      "Cada som declara o próprio gatilho, então acrescentar um quarto efeito",
+      "é acrescentar uma chave aqui, não mexer no código.",
+      "  transicao      abertura do clip e virada do hook para o conteúdo",
+      "  pico           picos de energia do áudio, medidos na etapa 2",
+      "  palavra_chave  palavras da lista abaixo, e exclamação na fala"
     ],
     "ativo": false,
     "diretorio": "assets/sfx",
-    "whoosh_em_corte": true,
-    "ding_em_pico": true,
-    "volume": 0.6
+    "volume": 0.6,
+    "_espacamento": "distância mínima entre dois efeitos; sem isso uma gargalhada vira metralhadora",
+    "espacamento_minimo_s": 1.5,
+    "maximo_por_clip": 8,
+
+    "eventos": {
+      "whoosh": {
+        "ativo": true,
+        "arquivo": "whoosh.wav",
+        "volume": 0.7,
+        "gatilho": "transicao"
+      },
+      "ding": {
+        "ativo": true,
+        "arquivo": "ding.wav",
+        "volume": 0.5,
+        "gatilho": "pico"
+      },
+      "pop": {
+        "ativo": true,
+        "arquivo": "pop.wav",
+        "volume": 0.5,
+        "gatilho": "palavra_chave"
+      }
+    },
+
+    "na_abertura": true,
+    "no_fim_do_hook": true,
+    "exclamacao_conta": true,
+    "palavras_chave": [
+      "risos", "haha", "kkk", "caramba", "nossa", "inacreditável",
+      "absurdo", "mentira", "jura", "meu deus"
+    ]
   }
 }

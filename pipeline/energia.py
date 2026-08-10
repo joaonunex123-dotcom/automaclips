@@ -112,6 +112,17 @@ def picos_do_audio(caminho, sample_rate=None, janela_s=None, percentil=None,
     return picos
 
 
+def picos_em(picos, inicio_s, fim_s, relativos=False):
+    """Picos dentro de [inicio_s, fim_s).
+
+    Com `relativos=True` o instante volta contado a partir de inicio_s — que é
+    o que a etapa 4 precisa para posicionar o efeito sonoro dentro do clip
+    recortado, e não dentro do vídeo-fonte.
+    """
+    dentro = [t for t in picos if inicio_s <= t < fim_s]
+    return [t - inicio_s for t in dentro] if relativos else dentro
+
+
 def contar_picos_em(picos, inicio_s, fim_s):
     """Quantos picos caem em [inicio_s, fim_s)."""
-    return sum(1 for t in picos if inicio_s <= t < fim_s)
+    return len(picos_em(picos, inicio_s, fim_s))

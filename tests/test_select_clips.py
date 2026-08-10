@@ -120,6 +120,17 @@ def test_energia_reforca_e_enfraquece_a_nota_do_claude(trecho):
     assert por_inicio[100]["score_final"] > por_inicio[300]["score_final"]
 
 
+def test_picos_saem_relativos_ao_inicio_do_trecho(trecho):
+    # A etapa 4 posiciona o efeito sonoro dentro do CLIP recortado; um pico em
+    # 105 s do vídeo-fonte cai em 5 s do clip que começa em 100.
+    avaliados = select_clips.selecionar(
+        [trecho(inicio_s=100, fim_s=160, score_claude=8.0)],
+        picos=[105.0, 130.0, 200.0], duracao_video=600, threshold=0.0,
+    )
+    assert avaliados[0]["picos_instantes"] == pytest.approx([5.0, 30.0])
+    assert avaliados[0]["picos_energia"] == 2
+
+
 def test_energia_sozinha_nao_promove_trecho_ruim(trecho):
     ruim = trecho(inicio_s=100, fim_s=160, score_claude=2.0)
     avaliados = select_clips.selecionar(

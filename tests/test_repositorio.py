@@ -478,6 +478,34 @@ def test_clips_para_renderizar_traz_as_fontes(conn, clip_id):
     assert linha["video_id"] == "vid1"
 
 
+def test_picos_do_clip_sao_persistidos(conn, clip_id):
+    repositorio.registrar_clips(
+        conn, clip_id, [_clip(picos_instantes=[5.0, 12.5, 30.0])]
+    )
+    id_do_clip = repositorio.clips_do_video(conn, clip_id)[0]["id"]
+    assert repositorio.picos_do_clip(conn, id_do_clip) == pytest.approx(
+        [5.0, 12.5, 30.0]
+    )
+
+
+def test_clip_sem_picos_devolve_lista_vazia(conn, clip_id):
+    repositorio.registrar_clips(conn, clip_id, [_clip()])
+    id_do_clip = repositorio.clips_do_video(conn, clip_id)[0]["id"]
+    assert repositorio.picos_do_clip(conn, id_do_clip) == []
+
+
+def test_reprocessar_nao_deixa_pico_orfao(conn, clip_id):
+    # ON DELETE CASCADE: sem ele, os picos do trecho antigo continuariam
+    # apontando para um clip que não existe mais.
+    repositorio.registrar_clips(
+        conn, clip_id, [_clip(inicio_s=100.0, picos_instantes=[5.0, 10.0])]
+    )
+    repositorio.registrar_clips(
+        conn, clip_id, [_clip(inicio_s=300.0, picos_instantes=[7.0])]
+    )
+    assert conn.execute("SELECT COUNT(*) FROM picos_clip").fetchone()[0] == 1
+
+
 def test_clip_sem_midia_ainda_aparece_na_fila(conn, clip_id):
     # LEFT JOIN de propósito: quem decide o que fazer com a fonte ausente é o
     # editar.py, com mensagem. Sumir da fila em silêncio seria pior.

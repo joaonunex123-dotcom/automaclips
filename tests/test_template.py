@@ -127,6 +127,55 @@ def test_watermark_ligada_sem_texto(tmp_path):
         )
 
 
+def test_sfx_vem_desligado(template):
+    # Depende de arquivos de áudio que não vêm no repositório.
+    assert template["sfx"]["ativo"] is False
+
+
+def test_sfx_declara_os_tres_gatilhos_do_spec(template):
+    gatilhos = {e["gatilho"] for e in template["sfx"]["eventos"].values()}
+    assert gatilhos == {"transicao", "pico", "palavra_chave"}
+
+
+def test_gatilho_desconhecido_e_recusado(tmp_path):
+    # Um som com gatilho inexistente nunca tocaria, em silêncio — o modo de
+    # falha invisível que só apareceria ao assistir o clip.
+    with pytest.raises(template_mod.TemplateInvalido, match="gatilho"):
+        template_mod.carregar(_escrever(tmp_path, {
+            "sfx": {"eventos": {"x": {"ativo": True, "arquivo": "x.wav",
+                                      "gatilho": "quando_der"}}}
+        }))
+
+
+def test_evento_ativo_sem_arquivo(tmp_path):
+    with pytest.raises(template_mod.TemplateInvalido, match="sem arquivo"):
+        template_mod.carregar(_escrever(tmp_path, {
+            "sfx": {"eventos": {"x": {"ativo": True, "arquivo": "",
+                                      "gatilho": "pico"}}}
+        }))
+
+
+def test_sfx_ligado_sem_nenhum_evento_ativo(tmp_path):
+    with pytest.raises(template_mod.TemplateInvalido, match="nada tocaria"):
+        template_mod.carregar(_escrever(tmp_path, {
+            "sfx": {"ativo": True,
+                    "eventos": {"x": {"ativo": False, "arquivo": "x.wav",
+                                      "gatilho": "pico"}}}
+        }))
+
+
+def test_volume_negativo(tmp_path):
+    with pytest.raises(template_mod.TemplateInvalido, match="sfx.volume"):
+        template_mod.carregar(_escrever(tmp_path, {"sfx": {"volume": -1}}))
+
+
+def test_palavras_chave_precisa_ser_lista(tmp_path):
+    with pytest.raises(template_mod.TemplateInvalido, match="palavras_chave"):
+        template_mod.carregar(
+            _escrever(tmp_path, {"sfx": {"palavras_chave": "caramba"}})
+        )
+
+
 # --- conversão de cor ---------------------------------------------------------
 
 def test_cor_ass_inverte_os_canais():

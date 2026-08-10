@@ -29,9 +29,10 @@ clips/
 *.mp3
 *.ass
 
-# Efeitos sonoros da etapa 4: binários grandes, licenciados individualmente.
-# Versionado é o template_config.json que os referencia.
-assets/sfx/
+# Efeitos sonoros: binários grandes, licenciados individualmente. Versionados
+# são o template_config.json que os referencia e o README que diz quais são.
+assets/sfx/*
+!assets/sfx/README.md
 
 # Ambiente e cache do Python.
 venv/

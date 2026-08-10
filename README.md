@@ -4,9 +4,9 @@ Pipeline automatizado de clips verticais: descobre vídeos em alta nos canais
 monitorados, recorta os melhores trechos, edita com legenda e SFX, publica e
 recalibra a seleção com base no que performou.
 
-Estado: **etapa 3 de 7** — do canal monitorado ao clip vertical renderizado,
-com legenda queimada. Ainda sem SFX e sem publicação. As etapas seguintes estão
-listadas em [Roadmap](#roadmap).
+Estado: **etapa 4 de 7** — do canal monitorado ao clip vertical renderizado,
+com legenda queimada e efeitos sonoros. Ainda sem publicação. As etapas
+seguintes estão listadas em [Roadmap](#roadmap).
 
 ## Instalação
 
@@ -183,6 +183,38 @@ a diferença de performance entre dois clips veio do trecho ou do visual —
 **mude a versão sempre que mexer no template**, senão a série histórica mistura
 dois visuais sem deixar rastro.
 
+## Efeitos sonoros
+
+Desligados por padrão: dependem de arquivos de áudio que não vêm no
+repositório. Ver [assets/sfx/README.md](assets/sfx/README.md) para ligar.
+
+Três gatilhos, cada um respondendo a um dado que o pipeline já produziu:
+
+| gatilho | quando |
+| --- | --- |
+| `transicao` | abertura do clip e virada do hook para o conteúdo |
+| `pico` | picos de energia do áudio, medidos na etapa 2 |
+| `palavra_chave` | palavras da lista do template, e exclamação na fala |
+
+Cada som declara o próprio gatilho no `template_config.json`, então
+acrescentar um quarto efeito é acrescentar uma chave — não mexer no código.
+
+O defeito que a regra de seleção existe para evitar: uma gargalhada produz
+vários picos seguidos **e** várias palavras marcadas ao mesmo tempo. Sem
+espaçamento mínimo e teto por clip, sai metralhadora de efeito em cima de três
+segundos de áudio. Em disputa por espaço vence a `transicao` — ela é
+estrutural, marca o corte; pico e palavra são realce, e perder um não custa
+nada.
+
+Os instantes dos picos ficam gravados por clip (`picos_clip`), relativos ao
+início dele. Recalcular na hora do render custaria carregar o áudio inteiro do
+vídeo-fonte — quase um gigabyte num podcast de quatro horas — uma vez por clip.
+
+Com `sfx.ativo: true` e um arquivo faltando, a carga do template **falha
+apontando qual**, antes do primeiro render. Pular o efeito em silêncio
+produziria um defeito que só aparece assistindo, muito depois de a fila
+inteira ter rodado.
+
 ## Estrutura
 
 ```
@@ -203,11 +235,14 @@ pipeline/highlight_detect.py Claude sobre a transcrição
 pipeline/select_clips.py     duração, energia, limiar, sobreposição
 pipeline/processar.py        orquestra a fila, com retomada e orçamento
 
-editing/template_config.json TODO parâmetro visual, nada no código
+editing/template_config.json TODO parâmetro visual e sonoro, nada no código
 editing/template.py          carga e validação do template
 editing/legendas.py          gera o .ass (string pura, sem ffmpeg)
+editing/sfx.py               decide quando cada efeito toca
 editing/render.py            monta e executa o comando do ffmpeg
 editing/editar.py            orquestra a fila de render
+
+assets/sfx/                  os arquivos de efeito (fora do git)
 ```
 
 `fila_clips` guarda o vídeo-FONTE; `midia` os artefatos baixados; `clips` os
@@ -259,9 +294,9 @@ qualquer commit.
 1. ~~`db/schema.sql` + `sourcing/` + fila~~
 2. ~~`pipeline/` — download, transcrição, `highlight_detect` (Claude + picos de
    energia via librosa)~~
-3. **`editing/` — template fixo em `template_config.json`, reframe + legendas
-   word-by-word** ← aqui
-4. SFX (whoosh nos cortes, ding/pop nos picos)
+3. ~~`editing/` — template fixo em `template_config.json`, reframe + legendas
+   word-by-word~~
+4. **SFX (whoosh nos cortes, ding/pop nos picos)** ← aqui
 5. `publish/` em modo sombra (`AUTO_PUBLISH=false`: gera e não posta)
 6. Publicação real com `scheduler.py`, respeitando quota
 7. `analytics/` + `recalibrate.py` — top 10% viram few-shot no prompt, canais

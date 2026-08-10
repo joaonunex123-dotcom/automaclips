@@ -126,9 +126,12 @@ def selecionar(trechos, picos=None, duracao_video=0, threshold=None):
 
         item["inicio_s"], item["fim_s"] = faixa
         duracao = item["fim_s"] - item["inicio_s"]
-        item["picos_energia"] = energia_mod.contar_picos_em(
-            picos, item["inicio_s"], item["fim_s"]
+        # Guardados relativos ao início do trecho: a etapa 4 posiciona o efeito
+        # sonoro dentro do clip recortado, não dentro do vídeo-fonte.
+        item["picos_instantes"] = energia_mod.picos_em(
+            picos, item["inicio_s"], item["fim_s"], relativos=True
         )
+        item["picos_energia"] = len(item["picos_instantes"])
         item["score_final"] = round(
             item["score_claude"] * fator_energia(item["picos_energia"], duracao), 3
         )
