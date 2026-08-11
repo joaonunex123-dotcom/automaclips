@@ -208,12 +208,18 @@ def _sanear(trechos):
 
 def detectar(transcricao_texto, cliente=None, exemplos=None, modelo=None,
              max_tokens=None, effort=None, usar_fallbacks=None,
-             limite_tokens=None):
+             limite_tokens=None, conn=None, referencia=""):
     """Trechos candidatos a partir da transcrição já formatada.
 
     Devolve dicts no vocabulário do banco (inicio_s, fim_s, score_claude,
     motivo, hook_text) — a tradução dos nomes da API acontece aqui, e não
     espalhada pelo resto do pipeline.
+
+    Continua no Claude direto, e de propósito: escolher o trecho é a decisão
+    que define o produto, e é a última coisa deste pipeline onde vale a pena
+    economizar. `conn` é opcional e só registra qual modelo escolheu — sem
+    isso, a etapa 7 compararia clips sem saber que a seleção mudou de modelo
+    no meio da série.
     """
     if not (transcricao_texto or "").strip():
         raise ErroHighlight("transcrição vazia — nada a analisar.")
@@ -247,4 +253,13 @@ def detectar(transcricao_texto, cliente=None, exemplos=None, modelo=None,
     trechos = _sanear(dados.get("trechos") or [])
     log.info("Claude devolveu %d trechos, %d utilizáveis.",
              len(dados.get("trechos") or []), len(trechos))
+
+    if conn is not None:
+        from db import repositorio
+
+        repositorio.registrar_geracao(
+            conn, repositorio.ETAPA_HIGHLIGHT, modelo or settings.CLAUDE_MODELO,
+            referencia=referencia,
+            modelo_respondeu=getattr(mensagem, "model", "") or "",
+        )
     return trechos

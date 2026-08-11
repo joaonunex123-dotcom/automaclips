@@ -4,6 +4,7 @@ import json
 import pytest
 
 import settings
+from db import repositorio
 from publish import metadata
 
 CLIP = {
@@ -21,8 +22,8 @@ RESPOSTA = {
 }
 
 
-def _cliente(cliente_claude, dados=None, **kwargs):
-    return cliente_claude(texto=json.dumps(dados or RESPOSTA), **kwargs)
+def _cliente(cliente_openrouter, dados=None, **kwargs):
+    return cliente_openrouter([json.dumps(dados or RESPOSTA)], **kwargs)
 
 
 # --- prompt -------------------------------------------------------------------
@@ -111,12 +112,12 @@ def test_hashtag_que_vira_vazia_e_descartada():
 
 # --- limites ------------------------------------------------------------------
 
-def test_titulo_e_cortado_no_limite_da_plataforma(cliente_claude):
+def test_titulo_e_cortado_no_limite_da_plataforma(cliente_openrouter):
     # O schema não aceita maxLength, e "peça ao modelo para não passar de 100"
     # é o tipo de restrição cumprida quase sempre — o que significa post
     # recusado de vez em quando, no horário agendado, sem ninguém olhando.
     longo = {**RESPOSTA, "titulo": "palavra " * 40}
-    meta = metadata.gerar(CLIP, cliente=_cliente(cliente_claude, longo))
+    meta = metadata.gerar(CLIP, cliente=_cliente(cliente_openrouter, longo))
     assert len(meta["titulo"]) <= settings.LIMITE_TITULO_YOUTUBE
 
 
@@ -135,43 +136,106 @@ def test_espacos_sao_colapsados():
 
 # --- geração ------------------------------------------------------------------
 
-def test_gera_o_metadado_completo(cliente_claude):
-    meta = metadata.gerar(CLIP, cliente=_cliente(cliente_claude))
+def test_gera_o_metadado_completo(cliente_openrouter):
+    meta = metadata.gerar(CLIP, cliente=_cliente(cliente_openrouter))
     assert meta["titulo"] == "O que ele nunca tinha contado"
     assert meta["hashtags"] == ["podcast", "entrevista", "bastidores"]
 
 
-def test_cache_control_fica_no_system(cliente_claude):
-    cliente = _cliente(cliente_claude)
+def test_system_e_contexto_vao_separados(cliente_openrouter):
+    cliente = _cliente(cliente_openrouter)
     metadata.gerar(CLIP, cliente=cliente)
-    chamada = cliente.chamadas[0]
-    assert chamada["system"][-1]["cache_control"] == {"type": "ephemeral"}
-    assert "cache_control" not in json.dumps(chamada["messages"])
+    mensagens = cliente.chamadas[0]["messages"]
+    assert mensagens[0]["role"] == "system"
+    assert mensagens[1]["role"] == "user"
+    assert "ele nunca contou isso" in mensagens[1]["content"]
 
 
-def test_usa_saida_estruturada(cliente_claude):
-    cliente = _cliente(cliente_claude)
+def test_pede_json_ao_modelo(cliente_openrouter):
+    cliente = _cliente(cliente_openrouter)
     metadata.gerar(CLIP, cliente=cliente)
-    formato = cliente.chamadas[0]["output_config"]["format"]
-    assert formato["schema"] is metadata.ESQUEMA
+    assert cliente.chamadas[0]["response_format"] == {"type": "json_object"}
 
 
-def test_titulo_vazio_e_erro(cliente_claude):
+def test_usa_o_modelo_de_metadata_e_o_fallback(cliente_openrouter):
+    cliente = _cliente(cliente_openrouter)
+    metadata.gerar(CLIP, cliente=cliente)
+    assert cliente.chamadas[0]["model"] == settings.MODEL_METADATA
+
+
+def test_resposta_malformada_cai_no_fallback(cliente_openrouter):
+    # Sem saída estruturada garantida, resposta ruim deixa de ser impossível e
+    # passa a ser rara — o fallback impede que "rara" vire "perdeu o clip".
+    cliente = cliente_openrouter(["desculpe, não posso", json.dumps(RESPOSTA)])
+    meta = metadata.gerar(CLIP, cliente=cliente)
+    assert meta["titulo"] == "O que ele nunca tinha contado"
+    assert cliente.chamadas[1]["model"] == settings.MODEL_FALLBACK
+
+
+def test_json_dentro_de_cerca_e_aceito_sem_fallback(cliente_openrouter):
+    cliente = cliente_openrouter([f"```json\n{json.dumps(RESPOSTA)}\n```"])
+    assert metadata.gerar(CLIP, cliente=cliente)["titulo"]
+    assert len(cliente.chamadas) == 1
+
+
+def test_formato_do_json_e_derivado_do_esquema():
+    # Escrever a forma à mão no prompt criaria duas fontes de verdade que se
+    # afastam na primeira vez que alguém acrescentar um campo.
+    descricao = metadata.descricao_do_formato()
+    for campo in metadata.ESQUEMA["properties"]:
+        assert f'"{campo}"' in descricao
+    assert descricao in metadata.montar_sistema()
+
+
+def test_titulo_vazio_e_erro(cliente_openrouter):
     # Um título vazio só apareceria na hora do upload, no horário agendado.
-    cliente = _cliente(cliente_claude, {**RESPOSTA, "titulo": "   "})
+    cliente = _cliente(cliente_openrouter, {**RESPOSTA, "titulo": "   "})
     with pytest.raises(metadata.ErroMetadata, match="título vazio"):
         metadata.gerar(CLIP, cliente=cliente)
 
 
-def test_recusa_vira_erro_do_modulo(cliente_claude):
-    cliente = cliente_claude(blocos=[], stop_reason="refusal")
-    with pytest.raises(metadata.ErroMetadata, match="recusou"):
+def test_erro_da_api_vira_erro_do_modulo(cliente_openrouter):
+    cliente = cliente_openrouter([RuntimeError("404: model not found")])
+    with pytest.raises(metadata.ErroMetadata, match="model not found"):
         metadata.gerar(CLIP, cliente=cliente)
 
 
-def test_json_invalido(cliente_claude):
-    with pytest.raises(metadata.ErroMetadata, match="JSON"):
-        metadata.gerar(CLIP, cliente=cliente_claude(texto="não é json"))
+def test_resposta_ininteligivel_nos_dois_modelos(cliente_openrouter):
+    cliente = cliente_openrouter(["não é json", "também não"])
+    with pytest.raises(metadata.ErroMetadata, match="nem o fallback"):
+        metadata.gerar(CLIP, cliente=cliente)
+
+
+def test_json_que_nao_e_objeto(cliente_openrouter):
+    cliente = cliente_openrouter(['["uma", "lista"]', '["ainda", "lista"]'])
+    with pytest.raises(metadata.ErroMetadata, match="não é um objeto"):
+        metadata.gerar(CLIP, cliente=cliente)
+
+
+def test_registra_qual_modelo_respondeu(conn, cliente_openrouter):
+    # Sem isso, a etapa 7 compararia clips sem saber que metade do texto veio
+    # de um modelo e metade de outro.
+    cliente = cliente_openrouter([json.dumps(RESPOSTA)],
+                                 modelo_respondeu="variante-x")
+    metadata.gerar({**CLIP, "id": 7}, cliente=cliente, conn=conn)
+
+    linha = repositorio.geracoes(conn, repositorio.ETAPA_METADATA)[0]
+    assert linha["modelo_pedido"] == settings.MODEL_METADATA
+    assert linha["modelo_respondeu"] == "variante-x"
+    assert linha["referencia"] == "7"
+    assert linha["usou_fallback"] == 0
+
+
+def test_registra_quando_o_fallback_entra(conn, cliente_openrouter):
+    cliente = cliente_openrouter(["lixo", json.dumps(RESPOSTA)])
+    metadata.gerar({**CLIP, "id": 7}, cliente=cliente, conn=conn)
+    assert repositorio.geracoes(conn, repositorio.ETAPA_METADATA)[0][
+        "usou_fallback"] == 1
+
+
+def test_gera_sem_banco(cliente_openrouter):
+    # A geração não depende de conn; é o que a mantém testável isolada.
+    assert metadata.gerar(CLIP, cliente=_cliente(cliente_openrouter))["titulo"]
 
 
 # --- montagem por plataforma --------------------------------------------------

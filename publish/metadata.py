@@ -10,23 +10,29 @@ então esta chamada é barata perto do `highlight_detect`. Vale o mesmo cuidado
 de sempre com o cache: o system é idêntico entre clips e leva o breakpoint; o
 contexto do clip vem depois dele.
 
-Limite de tamanho é aplicado AQUI, em Python, e não pedido ao modelo: o schema
-de saída estruturada não aceita `maxLength`, e "peça ao modelo para não passar
-de 100 caracteres" é exatamente o tipo de restrição que ele cumpre quase
-sempre — o que significa que a plataforma recusa o post de vez em quando, no
-horário agendado, sem ninguém olhando.
+Limite de tamanho é aplicado AQUI, em Python, e não pedido ao modelo: "peça ao
+modelo para não passar de 100 caracteres" é exatamente o tipo de restrição que
+ele cumpre quase sempre — o que significa que a plataforma recusa o post de vez
+em quando, no horário agendado, sem ninguém olhando.
+
+Esta etapa roda no OpenRouter (`llm_client`), não no Claude direto: escrever
+caption é trabalho de menor exigência que escolher o trecho, e modelo mais
+barato resolve. A consequência é que a saída estruturada GARANTIDA se perde —
+por isso o formato do JSON é descrito no prompt (derivado do ESQUEMA, para os
+dois não divergirem) e há um modelo de fallback quando a resposta vem
+ininteligível.
 """
-import json
 import logging
 import re
 
+import llm_client
 import settings
-from pipeline import claude_cliente
+from db import repositorio
 
 log = logging.getLogger(__name__)
 
 
-class ErroMetadata(claude_cliente.ErroClaude):
+class ErroMetadata(llm_client.ErroLLM):
     """Falha ao gerar o metadado."""
 
 
@@ -70,15 +76,32 @@ ESQUEMA = {
 }
 
 
+def descricao_do_formato(esquema=None):
+    """O formato do JSON, em texto, DERIVADO do ESQUEMA.
+
+    Escrever a forma à mão no prompt criaria duas fontes de verdade que se
+    afastam na primeira vez que alguém acrescentar um campo — e o sintoma
+    seria o modelo devolvendo uma chave que o código não lê, em silêncio.
+    """
+    esquema = esquema or ESQUEMA
+    tipos = {"string": '"..."', "array": '["...", "..."]'}
+    campos = [
+        f'  "{nome}": {tipos.get(corpo.get("type"), "...")}'
+        for nome, corpo in esquema["properties"].items()
+    ]
+    return "Responda com um objeto JSON, e nada além dele:\n{\n" + ",\n".join(campos) + "\n}"
+
+
 def montar_sistema(max_hashtags=None, limite_titulo=None):
-    """System prompt. Estável entre clips — é o que o cache guarda."""
+    """System prompt. Estável entre clips."""
     max_hashtags = settings.MAX_HASHTAGS if max_hashtags is None else max_hashtags
     limite_titulo = (settings.LIMITE_TITULO_YOUTUBE if limite_titulo is None
                      else limite_titulo)
     return (
         f"{_INSTRUCOES}\n\n"
         f"O título precisa caber em {limite_titulo:d} caracteres. "
-        f"Devolva até {max_hashtags:d} hashtags."
+        f"Devolva até {max_hashtags:d} hashtags.\n\n"
+        f"{descricao_do_formato()}"
     )
 
 
@@ -166,24 +189,40 @@ def normalizar(bruto, limites=None):
 
 
 def gerar(clip, fala="", titulo_fonte="", canal="", cliente=None, modelo=None,
-          max_tokens=None, effort=None, usar_fallbacks=None):
-    """Metadado de um clip. Devolve o dict já normalizado e cortado."""
-    cliente = (cliente if cliente is not None
-               else claude_cliente.construir_cliente(erro=ErroMetadata))
+          fallback=None, conn=None):
+    """Metadado de um clip. Devolve o dict já normalizado e cortado.
 
-    sistema = montar_sistema()
-    contexto = montar_contexto(clip, fala, titulo_fonte, canal)
-
-    mensagem = claude_cliente.chamar(
-        cliente, sistema, contexto, ESQUEMA, modelo=modelo,
-        max_tokens=max_tokens, effort=effort, usar_fallbacks=usar_fallbacks,
-    )
-    texto = claude_cliente.texto_da_resposta(mensagem, erro=ErroMetadata)
+    `conn` é opcional e serve só ao registro de qual modelo respondeu — a
+    geração funciona sem banco, o que mantém a função testável isolada.
+    """
+    modelo = modelo or settings.MODEL_METADATA
+    fallback = settings.MODEL_FALLBACK if fallback is None else fallback
 
     try:
-        dados = json.loads(texto)
-    except json.JSONDecodeError as e:
-        raise ErroMetadata(f"resposta não é JSON válido: {e}") from e
+        dados, detalhes = llm_client.call_llm(
+            montar_contexto(clip, fala, titulo_fonte, canal),
+            model=modelo,
+            system=montar_sistema(),
+            expect_json=True,
+            fallback_model=fallback,
+            cliente=cliente,
+            com_detalhes=True,
+        )
+    except llm_client.ErroLLM as e:
+        raise ErroMetadata(str(e)) from e
+
+    if not isinstance(dados, dict):
+        raise ErroMetadata(f"resposta não é um objeto JSON: {type(dados).__name__}")
+
+    if conn is not None:
+        repositorio.registrar_geracao(
+            conn, repositorio.ETAPA_METADATA, modelo,
+            referencia=clip.get("id", ""),
+            modelo_respondeu=detalhes.get("modelo_respondeu", ""),
+            usou_fallback=detalhes.get("usou_fallback", False),
+            tokens_entrada=detalhes.get("tokens_entrada"),
+            tokens_saida=detalhes.get("tokens_saida"),
+        )
 
     meta = normalizar(dados)
     if not meta["titulo"]:
@@ -191,7 +230,8 @@ def gerar(clip, fala="", titulo_fonte="", canal="", cliente=None, modelo=None,
         # apareceria na hora do upload — no horário agendado, sem ninguém
         # olhando.
         raise ErroMetadata("o modelo devolveu título vazio")
-    log.info("Metadado gerado: %r (%d hashtags).", meta["titulo"],
+    log.info("Metadado gerado por %s: %r (%d hashtags).",
+             detalhes.get("modelo_respondeu"), meta["titulo"],
              len(meta["hashtags"]))
     return meta
 

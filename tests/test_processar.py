@@ -38,7 +38,7 @@ def injecoes(transcricao, trecho):
             transcricao((10.0, 14.0, "boa noite"), (100.0, 145.0, "a virada")),
         )
 
-    def detectar(texto):
+    def detectar(texto, conn=None, referencia=""):
         estado["detectou"].append(texto)
         return [trecho(inicio_s=100.0, fim_s=145.0, score_claude=9.0)]
 
@@ -96,7 +96,9 @@ def test_a_transcricao_enviada_ao_claude_tem_timestamps(conn, enfileirar, injeco
 
 def test_nenhum_trecho_no_corte_vira_sem_clips(conn, enfileirar, injecoes, trecho):
     _, duplos = injecoes
-    duplos["detectar"] = lambda texto: [trecho(score_claude=1.0)]
+    duplos["detectar"] = lambda texto, conn=None, referencia="": [
+        trecho(score_claude=1.0)
+    ]
     clip_id = enfileirar()
 
     contagem = processar.processar_fila(conn, **duplos)

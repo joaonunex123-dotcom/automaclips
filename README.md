@@ -135,6 +135,31 @@ dois lados se curto), corte por limiar, e resolução de sobreposição mantendo
 de maior score. Tudo que sai vira linha com `status = 'descartado'` e o motivo —
 sem isso só se saberia como performou o que passou, nunca o que foi barrado.
 
+## Qual modelo faz o quê
+
+| etapa | provedor | por quê |
+| --- | --- | --- |
+| escolher os trechos | **Claude direto** (`claude-opus-5`) | é a decisão que define o produto — o último lugar onde vale economizar |
+| metadado (título, caption) | OpenRouter (`MODEL_METADATA`) | escrever caption é trabalho de menor exigência |
+| recalibração (etapa 7) | OpenRouter (`MODEL_RECALIBRATE`) | idem |
+| transcrição | OpenAI (`whisper-1`) | é o que devolve timestamp por palavra |
+
+O SDK da `openai` serve dois caminhos pela mesma dependência: a Whisper API e o
+OpenRouter, que é compatível e só muda a `base_url`.
+
+**O que se perde ao sair do Claude direto:** a saída estruturada *garantida*.
+Com `output_config.format` a resposta era JSON válido por construção; no
+caminho compatível com OpenAI o melhor disponível é `response_format:
+json_object`, que pede JSON mas não garante. Duas defesas cobrem isso: um
+extrator tolerante (tira cerca ```json e prosa em volta) e o `MODEL_FALLBACK`,
+que refaz a chamada num modelo mais forte quando a resposta é ininteligível.
+
+Qual modelo realmente respondeu fica gravado em `geracoes_llm` — o OpenRouter
+roteia para variantes e o fallback pode entrar no meio. Sem esse registro, a
+etapa 7 compararia performance de clips sem saber que metade do texto veio de
+um modelo e metade de outro, e atribuiria ao trecho uma diferença que era do
+texto.
+
 ## Transcrição: local ou pela API
 
 Dois backends, mesmo contrato de saída — nada depois de `transcribe.py` sabe

@@ -110,6 +110,7 @@ def agendar_pendentes(conn, plataformas=None, limite=None, agora=None,
             meta = gerar(
                 dict(linha), fala=_fala(linha, carregar_transcricao),
                 titulo_fonte=linha["titulo_fonte"], canal=linha["canal_nome"],
+                conn=conn,
             )
         except Exception as e:
             log.warning("Metadado falhou para o clip %s: %s", linha["id"], e)

@@ -7,7 +7,11 @@ python-dotenv>=1.0.0
 # Nenhuma destas é importada no topo de módulo: cada uma entra dentro da função
 # que a usa, para a suíte de testes rodar (e o resto do pipeline continuar
 # importável) numa máquina que não tenha meio gigabyte de wheel instalado.
+# Claude direto, só para o highlight_detect (escolher o trecho).
 anthropic>=0.116.0
+# Serve a DOIS caminhos, pelo mesmo SDK: a Whisper API da OpenAI (transcrição)
+# e o OpenRouter (metadado e recalibração), que é compatível e só muda a
+# base_url. Migrar essas etapas para o OpenRouter não acrescentou dependência.
 openai>=1.30.0
 yt-dlp>=2024.1.0
 faster-whisper>=1.0.0

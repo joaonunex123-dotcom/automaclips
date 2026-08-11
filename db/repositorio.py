@@ -579,6 +579,58 @@ def registrar_quota(conn, servico, dia, unidades):
         )
 
 
+# --- qual modelo gerou o quê --------------------------------------------------
+
+ETAPA_HIGHLIGHT = "highlight"
+ETAPA_METADATA = "metadata"
+ETAPA_RECALIBRATE = "recalibrate"
+
+
+def registrar_geracao(conn, etapa, modelo_pedido, referencia="",
+                      modelo_respondeu="", usou_fallback=False,
+                      tokens_entrada=None, tokens_saida=None):
+    """Anota qual modelo produziu uma saída. Nunca derruba quem chamou.
+
+    Registro é observabilidade, não trabalho: uma falha ao gravar aqui não
+    pode custar o metadado que acabou de ser gerado e pago.
+    """
+    try:
+        with escrita(conn):
+            conn.execute(
+                "INSERT INTO geracoes_llm"
+                " (etapa, referencia, modelo_pedido, modelo_respondeu,"
+                "  usou_fallback, tokens_entrada, tokens_saida)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (etapa, str(referencia), modelo_pedido,
+                 modelo_respondeu or modelo_pedido, 1 if usou_fallback else 0,
+                 tokens_entrada, tokens_saida),
+            )
+    except sqlite3.Error as e:
+        log.warning("Não consegui registrar a geração de %s: %s", etapa, e)
+
+
+def geracoes(conn, etapa=None, limite=None):
+    sql = "SELECT * FROM geracoes_llm"
+    parametros = []
+    if etapa is not None:
+        sql += " WHERE etapa = ?"
+        parametros.append(etapa)
+    sql += " ORDER BY id DESC"
+    if limite is not None:
+        sql += " LIMIT ?"
+        parametros.append(limite)
+    return conn.execute(sql, parametros).fetchall()
+
+
+def modelos_por_etapa(conn):
+    """{(etapa, modelo_respondeu): quantidade} — para o resumo e a etapa 7."""
+    linhas = conn.execute(
+        "SELECT etapa, modelo_respondeu, COUNT(*) AS n FROM geracoes_llm"
+        " GROUP BY etapa, modelo_respondeu"
+    ).fetchall()
+    return {(l["etapa"], l["modelo_respondeu"]): l["n"] for l in linhas}
+
+
 # --- tokens que giram ---------------------------------------------------------
 
 def obter_token(conn, servico):

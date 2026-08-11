@@ -283,6 +283,47 @@ def ffmpeg_fake(tmp_path):
     return str(caminho)
 
 
+class ClienteOpenRouterFalso:
+    """Duplo do cliente OpenAI-compatível usado contra o OpenRouter.
+
+    Aceita uma lista de respostas — a primeira serve o modelo principal, a
+    segunda o fallback — e registra os kwargs de cada chamada, para os testes
+    afirmarem sobre o formato da requisição sem rede nem chave.
+
+    Cada item pode ser: uma string (vira o content), um dict
+    {"content":..., "model":...}, ou uma exceção (que é levantada).
+    """
+
+    def __init__(self, respostas=None, modelo_respondeu=None):
+        self._respostas = list(respostas or [])
+        self._modelo_respondeu = modelo_respondeu
+        self.chamadas = []
+        self.chat = SimpleNamespace(
+            completions=SimpleNamespace(create=self._create)
+        )
+
+    def _create(self, **kwargs):
+        self.chamadas.append(kwargs)
+        item = self._respostas.pop(0) if self._respostas else '{}'
+        if isinstance(item, BaseException):
+            raise item
+        if isinstance(item, dict):
+            conteudo = item.get("content", "")
+            modelo = item.get("model")
+        else:
+            conteudo, modelo = item, None
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=conteudo))],
+            model=modelo or self._modelo_respondeu or kwargs.get("model"),
+            usage=SimpleNamespace(prompt_tokens=120, completion_tokens=45),
+        )
+
+
+@pytest.fixture
+def cliente_openrouter():
+    return ClienteOpenRouterFalso
+
+
 class RespostaFalsa:
     def __init__(self, dados=None, status_code=200, text=""):
         self._dados = dados if dados is not None else {}

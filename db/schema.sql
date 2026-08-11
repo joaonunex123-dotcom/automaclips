@@ -338,3 +338,29 @@ CREATE TABLE IF NOT EXISTS tokens (
     expira_em     TEXT,
     atualizado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
+
+-- Qual modelo produziu cada saída de LLM.
+--
+-- Existe porque o projeto passou a usar modelos DIFERENTES por etapa (Claude
+-- escolhe os trechos, modelos mais baratos escrevem o metadado) e porque o
+-- fallback pode trocar o modelo no meio de uma chamada. Sem registro, a etapa
+-- 7 compararia performance de clips sem saber que metade foi escrita por um
+-- modelo e metade por outro — e atribuiria ao trecho uma diferença que era do
+-- texto.
+--
+-- `modelo_respondeu` pode divergir de `modelo_pedido`: o OpenRouter roteia
+-- para variantes, e o fallback entra quando a resposta vem malformada. É o
+-- que respondeu que conta.
+CREATE TABLE IF NOT EXISTS geracoes_llm (
+    id               INTEGER PRIMARY KEY,
+    etapa            TEXT NOT NULL,
+    referencia       TEXT NOT NULL DEFAULT '',
+    modelo_pedido    TEXT NOT NULL,
+    modelo_respondeu TEXT NOT NULL DEFAULT '',
+    usou_fallback    INTEGER NOT NULL DEFAULT 0,
+    tokens_entrada   INTEGER,
+    tokens_saida     INTEGER,
+    registrado_em    TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+CREATE INDEX IF NOT EXISTS ix_geracoes_etapa
+    ON geracoes_llm (etapa, registrado_em);

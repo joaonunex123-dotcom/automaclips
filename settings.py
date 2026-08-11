@@ -74,6 +74,7 @@ def _caminho(nome, padrao):
 YOUTUBE_API_KEY = (os.getenv("YOUTUBE_API_KEY") or "").strip()
 ANTHROPIC_API_KEY = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
 OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
+OPENROUTER_API_KEY = (os.getenv("OPENROUTER_API_KEY") or "").strip()
 
 # --- modo sombra --------------------------------------------------------------
 #
@@ -248,6 +249,30 @@ CLIP_DURACAO_MAXIMA_S = _float("CLIP_DURACAO_MAXIMA_S", 60.0)
 
 # Corte do score_final (escala 0–10). Trecho abaixo é gravado como descartado.
 CLIP_SCORE_THRESHOLD = _float("CLIP_SCORE_THRESHOLD", 6.0)
+
+# --- OpenRouter: modelos das etapas de menor exigência -----------------------
+#
+# O `highlight_detect` continua no Claude direto (é a decisão que define o
+# produto). O que passa por aqui é o trabalho de menor exigência — escrever
+# metadado e recalibrar —, onde modelo mais barato resolve.
+#
+# Os slugs abaixo são os que o João escolheu. NÃO foram verificados contra o
+# catálogo do OpenRouter a partir daqui: se um estiver errado, a chamada volta
+# 404 com o nome do modelo na mensagem. Por isso são sobrescrevíveis por
+# ambiente — corrigir um slug é mexer no .env, não no código.
+OPENROUTER_BASE_URL = _caminho("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+
+MODEL_METADATA = _caminho("MODEL_METADATA", "deepseek/deepseek-v4-flash")
+MODEL_RECALIBRATE = _caminho("MODEL_RECALIBRATE", "z-ai/glm-5")
+
+# Usado quando o modelo principal devolve algo que não dá para interpretar.
+# Sem saída estruturada garantida (que era o que a API da Anthropic dava), a
+# resposta malformada deixa de ser impossível e passa a ser rara — o fallback
+# é o que impede que "rara" vire "perdeu o clip".
+MODEL_FALLBACK = _caminho("MODEL_FALLBACK", "anthropic/claude-sonnet-4-6")
+
+# Retentativas do SDK para 429/5xx no OpenRouter.
+OPENROUTER_MAX_RETRIES = _int("OPENROUTER_MAX_RETRIES", 3)
 
 # Guarda de custo: transcrição acima disto não é enviada ao Claude. Um podcast
 # de 4 h dá ~50k tokens e passa folgado; o teto existe para o caso patológico

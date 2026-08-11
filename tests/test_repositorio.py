@@ -447,6 +447,42 @@ def test_custo_guarda_o_consumo_alem_do_valor(conn):
     assert linha["referencia"] == "vid1"
 
 
+def test_geracao_guarda_quem_respondeu(conn):
+    repositorio.registrar_geracao(
+        conn, repositorio.ETAPA_METADATA, "deepseek/deepseek-v4-flash",
+        referencia="7", modelo_respondeu="variante-x", usou_fallback=True,
+        tokens_entrada=120, tokens_saida=45,
+    )
+    linha = repositorio.geracoes(conn)[0]
+    assert linha["modelo_pedido"] == "deepseek/deepseek-v4-flash"
+    assert linha["modelo_respondeu"] == "variante-x"
+    assert linha["usou_fallback"] == 1
+    assert linha["tokens_entrada"] == 120
+
+
+def test_modelo_respondeu_cai_no_pedido_quando_ausente(conn):
+    repositorio.registrar_geracao(conn, "metadata", "modelo-x")
+    assert repositorio.geracoes(conn)[0]["modelo_respondeu"] == "modelo-x"
+
+
+def test_geracoes_filtram_por_etapa(conn):
+    repositorio.registrar_geracao(conn, repositorio.ETAPA_HIGHLIGHT, "claude")
+    repositorio.registrar_geracao(conn, repositorio.ETAPA_METADATA, "deepseek")
+    assert len(repositorio.geracoes(conn, repositorio.ETAPA_HIGHLIGHT)) == 1
+    assert repositorio.modelos_por_etapa(conn) == {
+        (repositorio.ETAPA_HIGHLIGHT, "claude"): 1,
+        (repositorio.ETAPA_METADATA, "deepseek"): 1,
+    }
+
+
+def test_falha_ao_registrar_nao_derruba_quem_chamou(conn, caplog):
+    # Registro é observabilidade, não trabalho: perder a anotação não pode
+    # custar o metadado que acabou de ser gerado e pago.
+    conn.execute("DROP TABLE geracoes_llm")
+    repositorio.registrar_geracao(conn, "metadata", "modelo-x")
+    assert "Não consegui registrar" in caplog.text
+
+
 def test_render_ausente_e_none(conn, clip_id):
     repositorio.registrar_clips(conn, clip_id, [_clip()])
     id_do_clip = repositorio.clips_do_video(conn, clip_id)[0]["id"]

@@ -278,3 +278,30 @@ def test_modelo_padrao_e_o_de_settings(cliente_claude):
     cliente = cliente_claude(trechos=[])
     hd.detectar(TRANSCRICAO, cliente=cliente)
     assert cliente.chamadas[0]["model"] == settings.CLAUDE_MODELO
+
+
+def test_continua_falando_com_a_anthropic(cliente_claude):
+    # A migração para o OpenRouter NÃO alcança esta etapa: escolher o trecho é
+    # a decisão que define o produto. O duplo aqui é o cliente da Anthropic
+    # (superfície .messages.stream), não o OpenAI-compatível.
+    cliente = cliente_claude(trechos=[])
+    hd.detectar(TRANSCRICAO, cliente=cliente)
+    assert cliente.chamadas[0]["superficie"] in ("beta", "padrao")
+    assert "output_config" in cliente.chamadas[0]
+
+
+def test_registra_qual_modelo_escolheu(conn, cliente_claude):
+    # Ajuda a etapa 7 a não atribuir ao trecho uma diferença que era do modelo.
+    from db import repositorio
+
+    cliente = cliente_claude(trechos=[])
+    hd.detectar(TRANSCRICAO, cliente=cliente, conn=conn, referencia="vid1")
+
+    linha = repositorio.geracoes(conn, repositorio.ETAPA_HIGHLIGHT)[0]
+    assert linha["modelo_pedido"] == settings.CLAUDE_MODELO
+    assert linha["referencia"] == "vid1"
+
+
+def test_registro_e_opcional(cliente_claude):
+    cliente = cliente_claude(trechos=[])
+    assert hd.detectar(TRANSCRICAO, cliente=cliente) == []

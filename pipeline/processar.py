@@ -146,7 +146,7 @@ def _garantir_transcricao(conn, linha, midia, transcrever):
 def _analisar(conn, linha, midia, transcricao, detectar, picos_do_audio):
     """Passo 3: Claude + energia + seleção, gravados numa transação."""
     texto = transcribe_mod.texto_com_timestamps(transcricao)
-    trechos = detectar(texto)
+    trechos = detectar(texto, conn=conn, referencia=linha["video_id"])
 
     picos = picos_do_audio(midia["audio_path"])
     duracao = midia["duracao_real_s"] or transcricao.get("duracao_s") or 0
