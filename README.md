@@ -4,8 +4,8 @@ Pipeline automatizado de clips verticais: descobre vídeos em alta nos canais
 monitorados, recorta os melhores trechos, edita com legenda e SFX, publica e
 recalibra a seleção com base no que performou.
 
-Estado: **etapa 4 de 7** — do canal monitorado ao clip vertical renderizado,
-com legenda queimada e efeitos sonoros. Ainda sem publicação. As etapas
+Estado: **etapa 5 de 7** — do canal monitorado ao clip agendado, com metadado
+gerado. Em **modo sombra**: nada é publicado até `AUTO_PUBLISH=true`. As etapas
 seguintes estão listadas em [Roadmap](#roadmap).
 
 ## Instalação
@@ -71,8 +71,16 @@ python -m editing.editar
 ```
 
 Renderiza os trechos selecionados como .mp4 vertical, com legenda queimada,
-hook de abertura e watermark — tudo pelo `template_config.json`. Nada é
-publicado: com `AUTO_PUBLISH=false` os clips só ficam em `render/`.
+hook de abertura e watermark — tudo pelo `template_config.json`.
+
+```bash
+python -m publish.publicar
+```
+
+Gera o metadado de cada clip (uma chamada ao Claude serve as duas
+plataformas), marca um horário livre e processa o que venceu. Com
+`AUTO_PUBLISH=false` — o padrão — tudo acontece de verdade **menos** a chamada
+à plataforma: o post fica marcado como `simulado`, com o texto que sairia.
 
 Os módulos rodam com `python -m` (e não `python sourcing/descobrir.py`) porque
 importam entre pacotes: `-m` põe a raiz do repositório no `sys.path`.
@@ -215,6 +223,39 @@ apontando qual**, antes do primeiro render. Pular o efeito em silêncio
 produziria um defeito que só aparece assistindo, muito depois de a fila
 inteira ter rodado.
 
+## Publicação e modo sombra
+
+O `publicar` faz duas coisas separadas de propósito: **agendar** (gerar o
+metadado e marcar o horário) e **publicar** (processar o que venceu). O modo
+sombra vive só na segunda — é o que permite olhar a fila inteira, com os
+títulos e captions que realmente sairiam, antes de qualquer coisa ir ao ar.
+
+Ao ligar a publicação real, `--reagendar-simulados` devolve o que já foi
+planejado para a fila em vez de reconstruir tudo: o metadado gerado (e pago)
+continua valendo.
+
+**Quota do YouTube.** 1600 unidades por upload de um teto de 10.000 por dia —
+seis uploads, num teto que é do projeto inteiro e compartilhado com o
+sourcing. O detalhe que exige código próprio: o Google zera a quota à
+meia-noite do **Pacífico**, não do fuso local. Contando pela data daqui, o
+programa acharia que tem quota nova e gastaria uploads que o Google ainda
+conta no dia anterior — todos recusados.
+
+**Instagram.** Duas surpresas para quem chega do YouTube: não existe upload de
+arquivo (a API baixa o vídeo de uma URL, daí o `CLIPS_BASE_URL`), e a
+publicação é assíncrona em duas etapas — cria-se um contêiner, espera-se o
+processamento, e só então publica. O token de longa duração dura ~60 dias e é
+renovado pelo próprio programa: um token que morre num domingo derrubaria a
+fila até alguém notar. Por isso o valor vigente vive na tabela `tokens`, não
+no `.env` — segredo que o programa reescreve não cabe em arquivo que o humano
+edita.
+
+**Horários.** O spec pede que venham do histórico de engajamento, com
+horários padrão como fallback. Hoje o fallback é o caminho real, porque não
+existe histórico: nenhum clip foi publicado. `pesos_do_historico` já existe e
+devolve vazio — a etapa 7 a preenche e a ordenação por peso passa a valer sem
+que mais nada mude.
+
 ## Estrutura
 
 ```
@@ -231,6 +272,7 @@ pipeline/download.py         yt-dlp + extração do áudio de trabalho
 pipeline/transcribe.py       faster-whisper local, e a escolha de backend
 pipeline/whisper_api.py      Whisper API: compressão, fatiamento, custo
 pipeline/energia.py          picos de RMS (só carregar_audio toca o librosa)
+pipeline/claude_cliente.py   fiação comum das chamadas ao Claude
 pipeline/highlight_detect.py Claude sobre a transcrição
 pipeline/select_clips.py     duração, energia, limiar, sobreposição
 pipeline/processar.py        orquestra a fila, com retomada e orçamento
@@ -241,6 +283,13 @@ editing/legendas.py          gera o .ass (string pura, sem ffmpeg)
 editing/sfx.py               decide quando cada efeito toca
 editing/render.py            monta e executa o comando do ffmpeg
 editing/editar.py            orquestra a fila de render
+
+publish/metadata.py          título, descrição, caption e hashtags (Claude)
+publish/scheduler.py         atribui os horários
+publish/quota.py             quota diária do YouTube (dia do Pacífico)
+publish/youtube.py           upload via OAuth
+publish/instagram.py         Reels e renovação do token
+publish/publicar.py          agenda, publica ou simula
 
 assets/sfx/                  os arquivos de efeito (fora do git)
 ```
@@ -296,8 +345,8 @@ qualquer commit.
    energia via librosa)~~
 3. ~~`editing/` — template fixo em `template_config.json`, reframe + legendas
    word-by-word~~
-4. **SFX (whoosh nos cortes, ding/pop nos picos)** ← aqui
-5. `publish/` em modo sombra (`AUTO_PUBLISH=false`: gera e não posta)
+4. ~~SFX (whoosh nos cortes, ding/pop nos picos)~~
+5. **`publish/` em modo sombra (`AUTO_PUBLISH=false`: gera e não posta)** ← aqui
 6. Publicação real com `scheduler.py`, respeitando quota
 7. `analytics/` + `recalibrate.py` — top 10% viram few-shot no prompt, canais
    ruins saem do `canais.json`

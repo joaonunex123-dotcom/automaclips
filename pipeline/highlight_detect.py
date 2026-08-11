@@ -37,14 +37,18 @@ import json
 import logging
 
 import settings
+from pipeline import claude_cliente
 
 log = logging.getLogger(__name__)
 
-BETA_FALLBACK = "server-side-fallback-2026-07-01"
+# Reexportado: a fiação da chamada mora em pipeline/claude_cliente.py, mas quem
+# lê este módulo espera encontrar aqui o beta que ele usa.
+BETA_FALLBACK = claude_cliente.BETA_FALLBACK
 
 
-class ErroHighlight(Exception):
-    """Falha de configuração, de chamada ou de resposta do Claude."""
+class ErroHighlight(claude_cliente.ErroClaude):
+    """Falha desta etapa — inclui as da chamada e as daqui (transcrição vazia,
+    teto de tokens estourado), que não são problema do modelo."""
 
 
 # --- prompt -------------------------------------------------------------------
@@ -153,105 +157,18 @@ ESQUEMA = {
 
 
 # --- cliente ------------------------------------------------------------------
+#
+# A fiação (cache, streaming, fallback, leitura do stop_reason) mora em
+# pipeline/claude_cliente.py, compartilhada com publish/metadata.py. O que
+# muda entre as duas chamadas é só o prompt e o schema.
 
 def construir_cliente(api_key=None, max_retries=None):
-    """Cliente da Anthropic. Import local: módulo importável sem o SDK.
-
-    max_retries cobre 429/5xx/erro de conexão com backoff exponencial dentro do
-    próprio SDK — não há retry manual neste arquivo de propósito, seria uma
-    segunda camada exponencial em cima da primeira.
-    """
-    api_key = api_key if api_key is not None else settings.ANTHROPIC_API_KEY
-    if not api_key:
-        raise ErroHighlight(
-            "ANTHROPIC_API_KEY não configurada. Preencha no .env (ver .env.example)."
-        )
-    try:
-        import anthropic
-    except ImportError as e:  # pragma: no cover - ambiente sem o SDK
-        raise ErroHighlight(
-            "SDK anthropic não instalado (pip install -r requirements.txt)."
-        ) from e
-    return anthropic.Anthropic(
-        api_key=api_key,
-        max_retries=(settings.CLAUDE_MAX_RETRIES if max_retries is None else max_retries),
-    )
-
-
-def _blocos_system(sistema):
-    # cache_control no ÚLTIMO (aqui, único) bloco do system: a ordem de
-    # renderização é tools -> system -> messages, então o breakpoint aqui cobre
-    # todo o prefixo estável e deixa a transcrição de fora, que é o objetivo.
-    return [
-        {"type": "text", "text": sistema, "cache_control": {"type": "ephemeral"}}
-    ]
+    return claude_cliente.construir_cliente(api_key, max_retries, erro=ErroHighlight)
 
 
 def contar_tokens(cliente, sistema, usuario, modelo=None):
     """Tamanho do prompt, para a guarda de custo. Nunca estime por caractere."""
-    resposta = cliente.messages.count_tokens(
-        model=modelo or settings.CLAUDE_MODELO,
-        system=_blocos_system(sistema),
-        messages=[{"role": "user", "content": usuario}],
-    )
-    return resposta.input_tokens
-
-
-def _chamar(cliente, sistema, usuario, modelo=None, max_tokens=None, effort=None,
-            usar_fallbacks=None):
-    parametros = {
-        "model": modelo or settings.CLAUDE_MODELO,
-        "max_tokens": max_tokens or settings.CLAUDE_MAX_TOKENS,
-        "thinking": {"type": "adaptive"},
-        "output_config": {
-            "effort": effort or settings.CLAUDE_EFFORT,
-            "format": {"type": "json_schema", "schema": ESQUEMA},
-        },
-        "system": _blocos_system(sistema),
-        "messages": [{"role": "user", "content": usuario}],
-    }
-
-    if usar_fallbacks is None:
-        usar_fallbacks = settings.CLAUDE_FALLBACKS
-
-    # Streaming mesmo sem consumir os eventos: com transcrição longa e
-    # raciocínio adaptativo a requisição pode passar de minutos, e a versão
-    # não-streaming estoura o timeout de HTTP antes de responder.
-    if usar_fallbacks:
-        with cliente.beta.messages.stream(
-            betas=[BETA_FALLBACK], fallbacks="default", **parametros
-        ) as stream:
-            return stream.get_final_message()
-    with cliente.messages.stream(**parametros) as stream:
-        return stream.get_final_message()
-
-
-def _texto_da_resposta(mensagem):
-    """Valida o desfecho e devolve o texto JSON.
-
-    stop_reason é conferido ANTES de ler content: numa recusa o content vem
-    vazio (ou parcial), e indexar content[0] direto quebraria com IndexError em
-    vez de dizer o que aconteceu. Com fallback ligado, content também pode
-    começar com um bloco `fallback` — por isso a busca é pelo primeiro bloco de
-    texto, não pelo primeiro bloco.
-    """
-    if mensagem.stop_reason == "refusal":
-        detalhes = getattr(mensagem, "stop_details", None)
-        categoria = getattr(detalhes, "category", None) if detalhes else None
-        raise ErroHighlight(
-            f"Claude recusou a transcrição (categoria: {categoria or 'não informada'})."
-        )
-    if mensagem.stop_reason == "max_tokens":
-        raise ErroHighlight(
-            "resposta truncada por max_tokens — aumente CLAUDE_MAX_TOKENS "
-            f"(atual: {settings.CLAUDE_MAX_TOKENS})."
-        )
-    texto = next((b.text for b in mensagem.content if b.type == "text"), None)
-    if texto is None:
-        raise ErroHighlight(
-            f"resposta sem bloco de texto (stop_reason={mensagem.stop_reason})."
-        )
-    return texto
+    return claude_cliente.contar_tokens(cliente, sistema, usuario, modelo)
 
 
 def _sanear(trechos):
@@ -314,11 +231,11 @@ def detectar(transcricao_texto, cliente=None, exemplos=None, modelo=None,
     log.info("Enviando %d tokens de transcrição ao %s.", tokens,
              modelo or settings.CLAUDE_MODELO)
 
-    mensagem = _chamar(
-        cliente, sistema, transcricao_texto, modelo=modelo, max_tokens=max_tokens,
-        effort=effort, usar_fallbacks=usar_fallbacks,
+    mensagem = claude_cliente.chamar(
+        cliente, sistema, transcricao_texto, ESQUEMA, modelo=modelo,
+        max_tokens=max_tokens, effort=effort, usar_fallbacks=usar_fallbacks,
     )
-    texto = _texto_da_resposta(mensagem)
+    texto = claude_cliente.texto_da_resposta(mensagem, erro=ErroHighlight)
 
     try:
         dados = json.loads(texto)

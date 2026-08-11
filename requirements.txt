@@ -19,5 +19,15 @@ soundfile>=0.12.0
 # faixas de vídeo e áudio separadas do YouTube, e a extração do .wav é uma
 # chamada direta a ele.  Windows: winget install Gyan.FFmpeg
 
-# As dependências de edição (moviepy/ffmpeg-python) entram na etapa 3.
+# Etapa 5 — publish.
+#
+# O upload para o YouTube usa OAuth, não a chave de API do sourcing: são
+# credenciais diferentes do mesmo projeto no Google Cloud.
+google-auth-oauthlib>=1.2.0
+requests>=2.31.0
+# A quota do YouTube zera à meia-noite do Pacífico. O Windows não traz a base
+# de fusos IANA, e sem ela o zoneinfo não resolve America/Los_Angeles — o
+# código recua para UTC-8 fixo e avisa, mas o certo é ter a base.
+tzdata>=2024.1
+
 pytest>=7.0.0

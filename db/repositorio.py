@@ -432,10 +432,11 @@ def clips_para_agendar(conn, plataforma, limite=None):
     sql = (
         "SELECT c.*, r.caminho AS render_path, r.duracao_s AS render_duracao_s,"
         "       f.video_id, f.titulo AS titulo_fonte, f.canal_nome,"
-        "       f.url AS url_fonte"
+        "       f.url AS url_fonte, m.transcricao_path"
         " FROM clips c"
         " JOIN renders r ON r.clip_id = c.id"
         " JOIN fila_clips f ON f.id = c.fila_clip_id"
+        " LEFT JOIN midia m ON m.fila_clip_id = c.fila_clip_id"
         " LEFT JOIN publicacoes p ON p.clip_id = c.id AND p.plataforma = ?"
         " WHERE c.status = ? AND p.id IS NULL"
         " ORDER BY c.score_final DESC, c.id"
