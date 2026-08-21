@@ -98,8 +98,27 @@ Até oito palavras, tirada do próprio trecho ou fiel a ele, escrita para fazer 
 quem está rolando o feed parar."""
 
 
+def descricao_do_formato(esquema=None):
+    """O formato do JSON em texto, DERIVADO do ESQUEMA.
+
+    Só é usada fora da Anthropic. No caminho do Claude o schema vai declarado
+    em `output_config.format` e a resposta é JSON válido por construção; nos
+    outros o formato precisa ser DITO, e dizê-lo à mão criaria duas fontes de
+    verdade que se afastam no primeiro campo novo.
+    """
+    esquema = esquema or ESQUEMA
+    item = esquema["properties"]["trechos"]["items"]
+    tipos = {"number": "0", "string": '"..."'}
+    campos = ",\n".join(
+        f'      "{nome}": {tipos.get(corpo.get("type"), "...")}'
+        for nome, corpo in item["properties"].items()
+    )
+    return ('Responda com um objeto JSON, e nada além dele:\n'
+            '{\n  "trechos": [\n    {\n' + campos + "\n    }\n  ]\n}")
+
+
 def montar_sistema(exemplos=None, duracao_min=None, duracao_max=None,
-                   quantidade=None, licoes=""):
+                   quantidade=None, licoes="", com_formato=False):
     """Monta o system prompt. Estável entre vídeos — é o que o cache guarda.
 
     `exemplos` é a lista de few-shot que a etapa 7 (recalibrate) preenche com
@@ -132,6 +151,8 @@ def montar_sistema(exemplos=None, duracao_min=None, duracao_max=None,
         # sinal forte, e a lição em texto é o resumo dele — invertida, a frase
         # genérica leria como a regra e os exemplos como ilustração.
         partes += ["", "O que tem funcionado neste canal:", licoes.strip()]
+    if com_formato:
+        partes += ["", descricao_do_formato()]
     return "\n".join(partes)
 
 
@@ -212,9 +233,69 @@ def _sanear(trechos):
     return limpos
 
 
+def _detectar_via_llm_client(transcricao_texto, exemplos, licoes, modelo,
+                             cliente, conn, referencia, limite_tokens):
+    """Caminho fora da Anthropic (OpenRouter ou OpenAI), pelo llm_client.
+
+    Perde três coisas em relação ao caminho do Claude, e vale saber quais: a
+    saída estruturada GARANTIDA (aqui o JSON é pedido, não garantido, e depende
+    do extrator tolerante e do fallback), o cache do prompt, e o fallback
+    server-side contra recusa. Em troca, roda com o crédito que já existe — que
+    às vezes é a diferença entre rodar e não rodar.
+    """
+    import llm_client
+
+    modelo = modelo or settings.MODEL_HIGHLIGHT
+    sistema = montar_sistema(exemplos, licoes=licoes, com_formato=True)
+
+    # Guarda de custo APROXIMADA: aqui não há o contador de tokens do provedor
+    # à mão, então o teto é medido em caracteres. A razão é conservadora de
+    # propósito — errar para menos deixaria passar prompt maior que o teto.
+    limite = settings.TRANSCRICAO_MAX_TOKENS if limite_tokens is None else limite_tokens
+    if limite:
+        teto = limite * settings.CARACTERES_POR_TOKEN
+        if len(transcricao_texto) > teto:
+            raise ErroHighlight(
+                f"transcrição com {len(transcricao_texto)} caracteres passa do "
+                f"teto aproximado de {teto:.0f} (TRANSCRICAO_MAX_TOKENS). "
+                "Vídeo pulado sem custo de API."
+            )
+
+    try:
+        dados, detalhes = llm_client.call_llm(
+            transcricao_texto, model=modelo, system=sistema, expect_json=True,
+            fallback_model=settings.MODEL_FALLBACK, cliente=cliente,
+            com_detalhes=True,
+        )
+    except llm_client.ErroLLM as e:
+        raise ErroHighlight(str(e)) from e
+
+    if conn is not None:
+        from db import repositorio
+
+        repositorio.registrar_geracao(
+            conn, repositorio.ETAPA_HIGHLIGHT, modelo, referencia=referencia,
+            modelo_respondeu=detalhes.get("modelo_respondeu", ""),
+            usou_fallback=detalhes.get("usou_fallback", False),
+            tokens_entrada=detalhes.get("tokens_entrada"),
+            tokens_saida=detalhes.get("tokens_saida"),
+        )
+
+    if not isinstance(dados, dict):
+        raise ErroHighlight(
+            f"resposta não é um objeto JSON: {type(dados).__name__}"
+        )
+    trechos = _sanear(dados.get("trechos") or [])
+    log.info("%s devolveu %d trechos, %d utilizáveis.",
+             detalhes.get("modelo_respondeu"),
+             len(dados.get("trechos") or []), len(trechos))
+    return trechos
+
+
 def detectar(transcricao_texto, cliente=None, exemplos=None, modelo=None,
              max_tokens=None, effort=None, usar_fallbacks=None,
-             limite_tokens=None, conn=None, referencia="", licoes=""):
+             limite_tokens=None, conn=None, referencia="", licoes="",
+             provedor=None):
     """Trechos candidatos a partir da transcrição já formatada.
 
     Devolve dicts no vocabulário do banco (inicio_s, fim_s, score_claude,
@@ -229,6 +310,13 @@ def detectar(transcricao_texto, cliente=None, exemplos=None, modelo=None,
     """
     if not (transcricao_texto or "").strip():
         raise ErroHighlight("transcrição vazia — nada a analisar.")
+
+    escolhido = (provedor or settings.HIGHLIGHT_PROVEDOR or "").strip().lower()
+    if escolhido != "anthropic":
+        return _detectar_via_llm_client(
+            transcricao_texto, exemplos, licoes, modelo, cliente, conn,
+            referencia, limite_tokens,
+        )
 
     cliente = cliente if cliente is not None else construir_cliente()
     sistema = montar_sistema(exemplos, licoes=licoes)

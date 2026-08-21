@@ -305,3 +305,70 @@ def test_registra_qual_modelo_escolheu(conn, cliente_claude):
 def test_registro_e_opcional(cliente_claude):
     cliente = cliente_claude(trechos=[])
     assert hd.detectar(TRANSCRICAO, cliente=cliente) == []
+
+
+# --- provedor alternativo (OpenRouter / OpenAI) -------------------------------
+
+def test_padrao_continua_na_anthropic(cliente_claude):
+    # Escolher o trecho é a decisão que define o produto; trocar de provedor é
+    # decisão de custo consciente, não o caminho por omissão.
+    assert settings.HIGHLIGHT_PROVEDOR == "anthropic"
+    cliente = cliente_claude(trechos=[])
+    hd.detectar(TRANSCRICAO, cliente=cliente)
+    assert cliente.chamadas[0]["superficie"] in ("beta", "padrao")
+
+
+def test_provedor_openai_usa_o_llm_client(cliente_openrouter):
+    cliente = cliente_openrouter([json.dumps({"trechos": [_trecho_api()]})])
+    trechos = hd.detectar(TRANSCRICAO, cliente=cliente, provedor="openai")
+
+    assert len(trechos) == 1
+    assert trechos[0]["inicio_s"] == 100.0
+    assert cliente.chamadas[0]["model"] == settings.MODEL_HIGHLIGHT
+    assert cliente.chamadas[0]["response_format"] == {"type": "json_object"}
+
+
+def test_fora_da_anthropic_o_formato_vai_no_prompt(cliente_openrouter):
+    # Sem output_config.format não há JSON garantido: o formato precisa ser
+    # DITO, e é derivado do ESQUEMA para os dois não divergirem.
+    cliente = cliente_openrouter([json.dumps({"trechos": []})])
+    hd.detectar(TRANSCRICAO, cliente=cliente, provedor="openai")
+
+    sistema = cliente.chamadas[0]["messages"][0]["content"]
+    for campo in hd.ESQUEMA["properties"]["trechos"]["items"]["properties"]:
+        assert f'"{campo}"' in sistema
+
+
+def test_o_caminho_do_claude_nao_carrega_o_formato_no_prompt(cliente_claude):
+    # Lá o schema vai declarado; repeti-lo no texto seria ruído.
+    cliente = cliente_claude(trechos=[])
+    hd.detectar(TRANSCRICAO, cliente=cliente)
+    assert hd.descricao_do_formato() not in cliente.chamadas[0]["system"][0]["text"]
+
+
+def test_resposta_malformada_cai_no_fallback(cliente_openrouter):
+    cliente = cliente_openrouter(
+        ["desculpe, nao consigo", json.dumps({"trechos": [_trecho_api()]})]
+    )
+    assert len(hd.detectar(TRANSCRICAO, cliente=cliente, provedor="openai")) == 1
+    assert cliente.chamadas[1]["model"] == settings.MODEL_FALLBACK
+
+
+def test_guarda_de_custo_aproximada_por_caracteres(cliente_openrouter):
+    # Sem contador de tokens do provedor à mão, o teto vira estimativa.
+    cliente = cliente_openrouter([json.dumps({"trechos": []})])
+    with pytest.raises(hd.ErroHighlight, match="teto aproximado"):
+        hd.detectar("x" * 5000, cliente=cliente, provedor="openai",
+                    limite_tokens=100)
+    assert cliente.chamadas == []
+
+
+def test_registra_o_modelo_no_caminho_alternativo(conn, cliente_openrouter):
+    from db import repositorio
+
+    cliente = cliente_openrouter([json.dumps({"trechos": []})])
+    hd.detectar(TRANSCRICAO, cliente=cliente, provedor="openai", conn=conn,
+                referencia="vid9")
+    linha = repositorio.geracoes(conn, repositorio.ETAPA_HIGHLIGHT)[0]
+    assert linha["modelo_pedido"] == settings.MODEL_HIGHLIGHT
+    assert linha["referencia"] == "vid9"

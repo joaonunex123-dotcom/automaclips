@@ -1,9 +1,12 @@
 """Chamada a modelos via OpenRouter, para as etapas de menor exigência.
 
-Quem passa por aqui: `publish/metadata.py` (título, caption, hashtags) e, na
-etapa 7, `analytics/recalibrate.py`. O `pipeline/highlight_detect.py` NÃO usa
-este módulo — continua falando com a Anthropic direto, porque escolher o
-trecho é a decisão que define o produto.
+Quem passa por aqui: `publish/metadata.py` (título, caption, hashtags),
+`analytics/recalibrate.py` e — só quando HIGHLIGHT_PROVEDOR não é 'anthropic' —
+`pipeline/highlight_detect.py`.
+
+Dois destinos possíveis pelo mesmo SDK, escolhidos em LLM_PROVEDOR: o
+OpenRouter (catálogo grande, modelos baratos) e a própria OpenAI (útil quando
+o crédito já está lá). Muda a base_url e a chave; o resto é idêntico.
 
 O que muda ao sair da API da Anthropic, e por que este módulo tem o formato
 que tem:
@@ -42,17 +45,39 @@ class ErroLLM(Exception):
 _CERCA = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
 
 
-def construir_cliente(api_key=None, base_url=None, max_retries=None):
-    """Cliente OpenAI-compatível apontado para o OpenRouter.
+def credenciais(provedor=None):
+    """(api_key, base_url, nome_da_variavel) do provedor escolhido.
+
+    Os dois falam o mesmo protocolo pelo mesmo SDK; o que muda é para onde
+    apontar e qual chave usar. Devolver o NOME da variável junto é o que
+    permite a mensagem de erro dizer exatamente qual linha do .env preencher —
+    "sem chave" com dois provedores possíveis não ajuda ninguém.
+    """
+    provedor = (provedor or settings.LLM_PROVEDOR or "").strip().lower()
+    if provedor == "openai":
+        return settings.OPENAI_API_KEY, settings.OPENAI_BASE_URL, "OPENAI_API_KEY"
+    if provedor in ("", "openrouter"):
+        return (settings.OPENROUTER_API_KEY, settings.OPENROUTER_BASE_URL,
+                "OPENROUTER_API_KEY")
+    raise ErroLLM(
+        f"LLM_PROVEDOR inválido: {provedor!r} (use 'openrouter' ou 'openai')."
+    )
+
+
+def construir_cliente(api_key=None, base_url=None, max_retries=None,
+                      provedor=None):
+    """Cliente OpenAI-compatível, apontado para o provedor configurado.
 
     O SDK da `openai` já é dependência do projeto (a transcrição usa a Whisper
-    API), então falar com o OpenRouter não acrescenta dependência nenhuma —
-    só um `base_url` diferente.
+    API), então falar com o OpenRouter — ou com a própria OpenAI — não
+    acrescenta dependência nenhuma: só muda a `base_url`.
     """
-    api_key = api_key if api_key is not None else settings.OPENROUTER_API_KEY
+    padrao_key, padrao_url, nome_variavel = credenciais(provedor)
+    api_key = api_key if api_key is not None else padrao_key
+    base_url = base_url or padrao_url
     if not api_key:
         raise ErroLLM(
-            "OPENROUTER_API_KEY não configurada. Preencha no .env "
+            f"{nome_variavel} não configurada. Preencha no .env "
             "(ver .env.example)."
         )
     try:
@@ -63,7 +88,7 @@ def construir_cliente(api_key=None, base_url=None, max_retries=None):
         ) from e
     return OpenAI(
         api_key=api_key,
-        base_url=base_url or settings.OPENROUTER_BASE_URL,
+        base_url=base_url,
         max_retries=(settings.OPENROUTER_MAX_RETRIES if max_retries is None
                      else max_retries),
     )

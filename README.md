@@ -139,13 +139,22 @@ sem isso só se saberia como performou o que passou, nunca o que foi barrado.
 
 | etapa | provedor | por quê |
 | --- | --- | --- |
-| escolher os trechos | **Claude direto** (`claude-opus-5`) | é a decisão que define o produto — o último lugar onde vale economizar |
+| escolher os trechos | **Claude direto** (`claude-opus-5`), ou OpenAI/OpenRouter via `HIGHLIGHT_PROVEDOR` | é a decisão que define o produto — o último lugar onde vale economizar |
 | metadado (título, caption) | OpenRouter (`MODEL_METADATA`) | escrever caption é trabalho de menor exigência |
 | recalibração (etapa 7) | OpenRouter (`MODEL_RECALIBRATE`) | idem |
 | transcrição | OpenAI (`whisper-1`) | é o que devolve timestamp por palavra |
 
-O SDK da `openai` serve dois caminhos pela mesma dependência: a Whisper API e o
-OpenRouter, que é compatível e só muda a `base_url`.
+O SDK da `openai` serve três caminhos pela mesma dependência: a Whisper API, o
+OpenRouter e a própria OpenAI — todos compatíveis, só muda a `base_url`.
+`LLM_PROVEDOR` escolhe entre OpenRouter e OpenAI para metadado e recalibração;
+`HIGHLIGHT_PROVEDOR` faz o mesmo para a escolha do trecho, com `anthropic` como
+padrão.
+
+**Trocar o provedor do `highlight_detect` é decisão de custo, não de
+conveniência.** Fora da Anthropic perdem-se três coisas: a saída estruturada
+*garantida*, o cache de prompt e o fallback server-side contra recusa. Em troca,
+roda com o crédito que você já tem — que às vezes é a diferença entre rodar e
+não rodar.
 
 **O que se perde ao sair do Claude direto:** a saída estruturada *garantida*.
 Com `output_config.format` a resposta era JSON válido por construção; no

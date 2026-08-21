@@ -382,6 +382,32 @@ CLIP_SCORE_THRESHOLD = _float("CLIP_SCORE_THRESHOLD", 6.0)
 # 404 com o nome do modelo na mensagem. Por isso são sobrescrevíveis por
 # ambiente — corrigir um slug é mexer no .env, não no código.
 OPENROUTER_BASE_URL = _caminho("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+OPENAI_BASE_URL = _caminho("OPENAI_BASE_URL", "https://api.openai.com/v1")
+
+# 'openrouter' | 'openai'. Quem paga a conta do metadado e da recalibracao.
+# Sao compativeis pelo mesmo SDK -- muda a base_url e a chave.
+LLM_PROVEDOR = _caminho("LLM_PROVEDOR", "openrouter")
+
+# Quem escolhe o TRECHO: 'anthropic' (Claude direto) ou 'openai'.
+#
+# O padrao continua anthropic, e nao por inercia: escolher o trecho e a decisao
+# que define o produto, e o caminho do Claude usa saida estruturada GARANTIDA,
+# cache de prompt e fallback server-side, nenhum dos quais existe do outro
+# lado. Trocar e uma decisao de custo consciente, nao de conveniencia -- pelo
+# caminho openai a resposta passa a ser JSON PEDIDO, nao garantido, e depende
+# do extrator tolerante e do modelo de fallback.
+HIGHLIGHT_PROVEDOR = _caminho("HIGHLIGHT_PROVEDOR", "anthropic")
+
+# Modelo usado quando HIGHLIGHT_PROVEDOR nao e anthropic. NAO verificado
+# contra o catalogo vigente da OpenAI a partir daqui: se o slug estiver errado
+# a chamada volta 404 com o nome dentro, e corrigir e mexer no .env.
+MODEL_HIGHLIGHT = _caminho("MODEL_HIGHLIGHT", "gpt-4.1")
+
+# Quantos caracteres de transcricao equivalem a um token, aproximadamente.
+# Usado SO no caminho openai, onde nao ha um contador de tokens do provedor a
+# mao: a guarda de custo vira estimativa em vez de medida. Conservador de
+# proposito -- errar para menos deixaria passar prompt maior que o teto.
+CARACTERES_POR_TOKEN = _float("CARACTERES_POR_TOKEN", 3.0)
 
 MODEL_METADATA = _caminho("MODEL_METADATA", "deepseek/deepseek-v4-flash")
 MODEL_RECALIBRATE = _caminho("MODEL_RECALIBRATE", "z-ai/glm-5")
