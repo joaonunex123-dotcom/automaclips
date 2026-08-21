@@ -38,6 +38,10 @@ clips/
 assets/sfx/*
 !assets/sfx/README.md
 
+# Bancada de teste local: video sintetico, transcricao e render de
+# validacao. Reproduzivel por teste_local/primeiro_clip.py.
+teste_local/
+
 # Ambiente e cache do Python.
 venv/
 .venv/

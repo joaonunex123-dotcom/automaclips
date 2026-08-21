@@ -133,6 +133,13 @@ def test_playres_acompanha_a_resolucao_de_saida(template, palavras):
     assert f"PlayResY: {template['saida']['altura']}" in texto
 
 
+
+def test_quebra_automatica_esta_ligada(template, palavras):
+    # Achado no primeiro render real: o hook é frase livre do LLM e, sem
+    # quebra, "A LIGAÇÃO QUE MUDOU TUDO" a 96px sai cortada nas duas bordas.
+    # palavras_por_linha continua sendo o controle primário; a quebra é rede.
+    assert "WrapStyle: 0" in legendas.gerar_ass(template, palavras)
+
 def test_gera_os_tres_estilos(template, palavras):
     texto = legendas.gerar_ass(template, palavras)
     for estilo in (legendas.ESTILO_LEGENDA, legendas.ESTILO_HOOK,

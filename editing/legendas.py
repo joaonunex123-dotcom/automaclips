@@ -118,9 +118,19 @@ def _cabecalho(config):
         # estica a legenda inteira sem erro nenhum.
         f"PlayResX: {int(saida['largura'])}",
         f"PlayResY: {int(saida['altura'])}",
-        # 2 = sem quebra automática. A quebra é decidida por palavras_por_linha,
-        # e deixar o renderizador também quebrar produziria linhas órfãs.
-        "WrapStyle: 2",
+        # 0 = quebra automática equilibrada.
+        #
+        # Já foi 2 (sem quebra nenhuma), com o raciocínio de que
+        # palavras_por_linha decide a quebra e o renderizador não deveria
+        # opinar. O primeiro render real mostrou o furo: isso valia para a
+        # LEGENDA, que tem controle de palavras por linha, e não para o hook,
+        # que é frase livre do LLM — "A LIGAÇÃO QUE MUDOU TUDO" a 96px saiu
+        # cortada nas duas bordas. A legenda também estoura quando as três
+        # palavras são longas.
+        #
+        # Com 0, palavras_por_linha continua sendo o controle primário (linha
+        # que cabe não é tocada) e a quebra só entra como rede de segurança.
+        "WrapStyle: 0",
         "ScaledBorderAndShadow: yes",
         "",
     ]
