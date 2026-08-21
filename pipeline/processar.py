@@ -143,14 +143,51 @@ def _garantir_transcricao(conn, linha, midia, transcrever):
     return transcricao
 
 
+def _calibracao(conn):
+    """O que a etapa 7 aprendeu, ou os defaults do settings.
+
+    Falha aqui NÃO derruba o vídeo: recalibração é melhoria, e um pipeline que
+    para de processar porque o histórico está ilegível troca um ganho marginal
+    por uma parada total. Sem ela, o comportamento é o de antes da etapa 7.
+    """
+    vazio = {"exemplos": [], "licoes": "", "duracao_minima": None,
+             "duracao_maxima": None}
+    try:
+        from analytics import recalibrate
+
+        def _numero(chave):
+            bruto = repositorio.obter_calibracao(conn, chave)
+            return float(bruto) if bruto is not None else None
+
+        return {
+            "exemplos": recalibrate.exemplos_few_shot(conn),
+            "licoes": repositorio.obter_calibracao(
+                conn, settings.CALIBRACAO_LICOES, ""
+            ),
+            "duracao_minima": _numero(settings.CALIBRACAO_DURACAO_MIN),
+            "duracao_maxima": _numero(settings.CALIBRACAO_DURACAO_MAX),
+        }
+    except Exception as e:
+        log.warning("Calibração indisponível (%s); usando os padrões.", e)
+        return vazio
+
+
 def _analisar(conn, linha, midia, transcricao, detectar, picos_do_audio):
     """Passo 3: Claude + energia + seleção, gravados numa transação."""
     texto = transcribe_mod.texto_com_timestamps(transcricao)
-    trechos = detectar(texto, conn=conn, referencia=linha["video_id"])
+    calibracao = _calibracao(conn)
+    trechos = detectar(
+        texto, conn=conn, referencia=linha["video_id"],
+        exemplos=calibracao["exemplos"], licoes=calibracao["licoes"],
+    )
 
     picos = picos_do_audio(midia["audio_path"])
     duracao = midia["duracao_real_s"] or transcricao.get("duracao_s") or 0
-    avaliados = select_clips.selecionar(trechos, picos=picos, duracao_video=duracao)
+    avaliados = select_clips.selecionar(
+        trechos, picos=picos, duracao_video=duracao,
+        duracao_minima=calibracao["duracao_minima"],
+        duracao_maxima=calibracao["duracao_maxima"],
+    )
 
     repositorio.registrar_clips(conn, linha["id"], avaliados)
     selecionados = sum(

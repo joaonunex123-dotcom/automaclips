@@ -81,12 +81,36 @@ def test_publish_agenda_antes_de_publicar(conn, monkeypatch):
     assert ordem == ["agendar", "publicar"]
 
 
-def test_analytics_e_um_lugar_vazio_e_nao_um_esboco(conn, caplog):
-    # Um esboço que fingisse medir engajamento produziria números inventados,
-    # e a recalibração passaria a confiar neles.
-    caplog.set_level(logging.INFO)
-    assert main_loop.etapa_analytics(conn) == {}
-    assert "etapa 7" in caplog.text.lower()
+def test_analytics_mede_antes_de_recalibrar(conn, monkeypatch):
+    # Recalibrar sobre o histórico de ontem desperdiçaria um dia inteiro de
+    # medição que já está disponível.
+    from analytics import coletar, recalibrate
+
+    ordem = []
+    monkeypatch.setattr(coletar, "coletar",
+                        lambda c: ordem.append("medir") or {"youtube": 2})
+    monkeypatch.setattr(recalibrate, "recalibrar",
+                        lambda c: ordem.append("recalibrar") or {"exemplos": 3})
+
+    resultado = main_loop.etapa_analytics(conn)
+    assert ordem == ["medir", "recalibrar"]
+    assert resultado["medidos"] == {"youtube": 2}
+
+
+def test_coleta_falhada_nao_impede_a_recalibracao(conn, monkeypatch, caplog):
+    # Dado velho continua sendo dado: o que já foi medido antes ainda serve,
+    # e as duas metades são independentes de propósito.
+    from analytics import coletar, recalibrate
+
+    def explode(c):
+        raise RuntimeError("token vencido")
+
+    monkeypatch.setattr(coletar, "coletar", explode)
+    monkeypatch.setattr(recalibrate, "recalibrar", lambda c: {"exemplos": 3})
+
+    resultado = main_loop.etapa_analytics(conn)
+    assert resultado["recalibracao"] == {"exemplos": 3}
+    assert "token vencido" in caplog.text
 
 
 # --- sourcing sem canais ------------------------------------------------------

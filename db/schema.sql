@@ -14,9 +14,11 @@
 --                   humano ler o log e para ordenar eventos da mesma máquina;
 --                   nunca entra em cálculo.
 --
--- Este arquivo cobre as etapas 1 (sourcing + fila) e 2 (pipeline). A tabela
--- `resultados` (analytics) entra na etapa 7, quando houver código que a
--- escreva — schema adiantado é schema adivinhado.
+-- Este arquivo cobre as sete etapas. Cada bloco abaixo foi acrescentado
+-- quando havia código que o escrevesse — nada de schema adivinhado — e
+-- sempre de forma ADITIVA: só CREATE TABLE IF NOT EXISTS, nenhum ALTER, o
+-- que torna aplicar sobre um banco antigo inofensivo e dispensa um sistema
+-- de migração.
 
 -- Um vídeo-FONTE descoberto num canal monitorado. Não é o clip cortado: é o
 -- material bruto de onde os clips da etapa 2 vão sair.
@@ -364,3 +366,75 @@ CREATE TABLE IF NOT EXISTS geracoes_llm (
 );
 CREATE INDEX IF NOT EXISTS ix_geracoes_etapa
     ON geracoes_llm (etapa, registrado_em);
+
+-- ============================================================================
+-- Etapa 7 — analytics
+-- ============================================================================
+
+-- Uma MEDIÇÃO da performance real de um clip publicado.
+--
+-- Histórico, não estado: cada coleta anexa uma linha, como observacoes_video.
+-- Um clip medido só uma vez não diz se cresceu ou estagnou, e é exatamente
+-- essa diferença que separa um clip que pegou de um que teve um pico de
+-- notificação e morreu.
+--
+-- Denormalizada de propósito, ao contrário do resto do schema. `score_previsto`
+-- e os dados do trecho são um INSTANTÂNEO do momento da medição: reprocessar um
+-- vídeo apaga e recria as linhas de `clips` (registrar_clips), então buscar o
+-- score por JOIN meses depois traria o score recalibrado de hoje, não o que a
+-- seleção realmente apostou. Comparar previsão com resultado exige que a
+-- previsão fique congelada.
+CREATE TABLE IF NOT EXISTS resultados (
+    id             INTEGER PRIMARY KEY,
+    publicacao_id  INTEGER NOT NULL REFERENCES publicacoes(id) ON DELETE CASCADE,
+    clip_id        INTEGER NOT NULL,
+    plataforma     TEXT NOT NULL,
+
+    -- A fonte, para descobrir canal que rende e canal que não rende.
+    canal_id_fonte TEXT NOT NULL DEFAULT '',
+    canal_fonte    TEXT NOT NULL DEFAULT '',
+
+    -- O trecho, para a recalibração de duração.
+    trecho_inicio_s  REAL NOT NULL DEFAULT 0,
+    trecho_duracao_s REAL NOT NULL DEFAULT 0,
+
+    -- O que a seleção previu, congelado.
+    score_previsto REAL NOT NULL DEFAULT 0,
+
+    -- O que aconteceu de verdade.
+    views          INTEGER NOT NULL DEFAULT 0,
+    likes          INTEGER NOT NULL DEFAULT 0,
+    comentarios    INTEGER NOT NULL DEFAULT 0,
+    -- Fração média assistida (0–1). NULL é o normal: exige a YouTube Analytics
+    -- API, que é outro escopo de OAuth — ver settings.ANALYTICS_RETENCAO.
+    -- A recalibração de duração degrada para views/hora quando falta.
+    retencao       REAL,
+
+    -- Idade do post no momento da medição. É o denominador do desempenho:
+    -- ranquear por views cruas premiaria post antigo, o mesmo erro que o score
+    -- de sourcing existe para evitar.
+    horas_publicado REAL NOT NULL DEFAULT 0,
+    coletado_em    TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+CREATE INDEX IF NOT EXISTS ix_resultados_publicacao
+    ON resultados (publicacao_id, id DESC);
+CREATE INDEX IF NOT EXISTS ix_resultados_canal
+    ON resultados (canal_id_fonte);
+
+-- Valores que a recalibração aprende e passa a mandar no pipeline.
+--
+-- Tabela e não .env de propósito: o .env é território do humano (guarda
+-- segredo e é editado à mão), e um valor que o programa reescreve sozinho ali
+-- viraria conflito na primeira vez que alguém abrisse o arquivo. Aqui o valor
+-- fica auditável (`motivo`, `amostras`) e reversível — apagar a linha devolve
+-- o default do settings.
+--
+-- Quem lê cada chave cai no settings quando ela não existe, então um banco sem
+-- calibração nenhuma se comporta exatamente como antes da etapa 7.
+CREATE TABLE IF NOT EXISTS calibracao (
+    chave         TEXT PRIMARY KEY,
+    valor         TEXT NOT NULL,
+    amostras      INTEGER NOT NULL DEFAULT 0,
+    motivo        TEXT NOT NULL DEFAULT '',
+    atualizado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);

@@ -612,6 +612,133 @@ def registrar_quota(conn, servico, dia, unidades):
         )
 
 
+# --- resultados (etapa 7) -----------------------------------------------------
+
+def publicacoes_para_medir(conn, idade_minima_h=0.0, agora=None, limite=None):
+    """Posts que sairam de verdade e valem uma medicao.
+
+    So 'publicado': 'simulado' nao existe em plataforma nenhuma, e medi-lo
+    devolveria zero para sempre — zeros que entrariam na media e puxariam a
+    recalibracao para baixo.
+    """
+    # `publicado_em` e gravado em hora LOCAL (convencao do schema para
+    # timestamp de controle), entao o "agora" da subtracao tambem precisa ser
+    # local. Comparar com julianday('now'), que e UTC, inflaria a idade de todo
+    # post pelo deslocamento do fuso -- tres horas aqui. Ranking nao mudaria (o
+    # erro e constante), mas os cortes de idade minima e maxima sao absolutos e
+    # passariam a disparar cedo demais.
+    if agora is None:
+        instante = "julianday('now', 'localtime')"
+        de_agora = []
+    else:
+        instante = "julianday(?)"
+        de_agora = [agora]
+
+    sql = (
+        "SELECT p.*, c.inicio_s, c.fim_s, c.score_final, c.hook_text, c.motivo,"
+        "       f.canal_id AS canal_id_fonte, f.canal_nome AS canal_fonte,"
+        f"       ({instante} - julianday(p.publicado_em)) * 24.0 AS horas_publicado"
+        " FROM publicacoes p"
+        " JOIN clips c ON c.id = p.clip_id"
+        " JOIN fila_clips f ON f.id = c.fila_clip_id"
+        " WHERE p.status = ? AND p.publicado_em IS NOT NULL"
+        "   AND p.id_externo <> ''"
+        f"   AND ({instante} - julianday(p.publicado_em)) * 24.0 >= ?"
+        " ORDER BY p.publicado_em DESC"
+    )
+    parametros = de_agora + [PUB_PUBLICADO] + de_agora + [float(idade_minima_h)]
+    if limite is not None:
+        sql += " LIMIT ?"
+        parametros.append(limite)
+    return conn.execute(sql, parametros).fetchall()
+
+
+def registrar_resultado(conn, publicacao, metricas, horas_publicado=0.0):
+    """Anexa uma medicao. `publicacao` e a linha de publicacoes_para_medir."""
+    with escrita(conn):
+        conn.execute(
+            "INSERT INTO resultados"
+            " (publicacao_id, clip_id, plataforma, canal_id_fonte, canal_fonte,"
+            "  trecho_inicio_s, trecho_duracao_s, score_previsto,"
+            "  views, likes, comentarios, retencao, horas_publicado)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                publicacao["id"], publicacao["clip_id"], publicacao["plataforma"],
+                publicacao["canal_id_fonte"] or "", publicacao["canal_fonte"] or "",
+                float(publicacao["inicio_s"] or 0),
+                float(publicacao["fim_s"] or 0) - float(publicacao["inicio_s"] or 0),
+                float(publicacao["score_final"] or 0),
+                int(metricas.get("views") or 0),
+                int(metricas.get("likes") or 0),
+                int(metricas.get("comentarios") or 0),
+                metricas.get("retencao"),
+                float(horas_publicado or 0),
+            ),
+        )
+
+
+def ultimos_resultados(conn, idade_minima_h=0.0):
+    """A medicao MAIS RECENTE de cada publicacao.
+
+    Uma linha por publicacao e nao por medicao: a recalibracao quer o estado
+    atual de cada post, e somar o historico contaria o mesmo clip varias vezes,
+    dando peso extra justamente aos posts mais antigos (que foram medidos mais
+    vezes).
+    """
+    return conn.execute(
+        "SELECT r.*, c.hook_text, c.motivo,"
+        # A hora em que o post REALMENTE saiu, nao a que estava agendada: e a
+        # que a audiencia viu, e e ela que o scheduler quer aprender.
+        "       CAST(strftime('%H', p.publicado_em) AS INTEGER) AS hora_publicado,"
+        "       CAST(strftime('%M', p.publicado_em) AS INTEGER) AS minuto_publicado"
+        " FROM resultados r"
+        " JOIN clips c ON c.id = r.clip_id"
+        " JOIN publicacoes p ON p.id = r.publicacao_id"
+        " WHERE r.id IN ("
+        "   SELECT MAX(id) FROM resultados GROUP BY publicacao_id"
+        " ) AND r.horas_publicado >= ?"
+        " ORDER BY r.id DESC",
+        (float(idade_minima_h),),
+    ).fetchall()
+
+
+def contar_resultados(conn):
+    return int(conn.execute("SELECT COUNT(*) FROM resultados").fetchone()[0])
+
+
+# --- calibracao aprendida (etapa 7) -------------------------------------------
+
+def obter_calibracao(conn, chave, padrao=None):
+    """O valor aprendido, ou `padrao` se a recalibracao ainda nao o produziu.
+
+    Cair no padrao e o caminho normal e nao um erro: um banco sem calibracao
+    nenhuma se comporta exatamente como antes da etapa 7.
+    """
+    linha = conn.execute(
+        "SELECT valor FROM calibracao WHERE chave = ?", (chave,)
+    ).fetchone()
+    return linha[0] if linha else padrao
+
+
+def salvar_calibracao(conn, chave, valor, amostras=0, motivo=""):
+    with escrita(conn):
+        conn.execute(
+            "INSERT INTO calibracao (chave, valor, amostras, motivo)"
+            " VALUES (?, ?, ?, ?)"
+            " ON CONFLICT(chave) DO UPDATE SET"
+            "   valor = excluded.valor, amostras = excluded.amostras,"
+            "   motivo = excluded.motivo,"
+            "   atualizado_em = datetime('now', 'localtime')",
+            (chave, str(valor), int(amostras), motivo),
+        )
+
+
+def toda_calibracao(conn):
+    return conn.execute(
+        "SELECT * FROM calibracao ORDER BY chave"
+    ).fetchall()
+
+
 # --- qual modelo gerou o quê --------------------------------------------------
 
 ETAPA_HIGHLIGHT = "highlight"

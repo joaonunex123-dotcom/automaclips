@@ -100,7 +100,8 @@ def _sobrepoe(a, b):
     return a["inicio_s"] < b["fim_s"] and b["inicio_s"] < a["fim_s"]
 
 
-def selecionar(trechos, picos=None, duracao_video=0, threshold=None):
+def selecionar(trechos, picos=None, duracao_video=0, threshold=None,
+               duracao_minima=None, duracao_maxima=None):
     """Aplica as quatro regras. Devolve a lista pronta para registrar_clips.
 
     Todos os trechos voltam — os aprovados com status 'selecionado', os demais
@@ -113,7 +114,10 @@ def selecionar(trechos, picos=None, duracao_video=0, threshold=None):
     avaliados = []
     for trecho in trechos:
         item = dict(trecho)
-        faixa = ajustar_duracao(item["inicio_s"], item["fim_s"], duracao_video)
+        faixa = ajustar_duracao(
+            item["inicio_s"], item["fim_s"], duracao_video,
+            minima=duracao_minima, maxima=duracao_maxima,
+        )
         if faixa is None:
             item.update(
                 picos_energia=0,

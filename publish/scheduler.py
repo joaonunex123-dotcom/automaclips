@@ -66,12 +66,26 @@ def horarios_configurados(horarios=None):
 def pesos_do_historico(conn):
     """{(hora, minuto): peso} a partir do engajamento observado.
 
-    Vazio hoje, e isso é o comportamento correto e não um esboço: sem clip
-    publicado não existe engajamento para medir, e inventar um peso seria
-    apresentar palpite como dado. A etapa 7 substitui o corpo desta função
-    pela leitura de `resultados`; o resto do módulo já sabe usar o retorno.
+    Vazio enquanto não houver posts medidos suficientes, e vazio é o
+    comportamento correto: sem dado, todos os horários empatam e a agenda sai
+    na ordem natural do dia. Inventar um peso seria apresentar palpite como
+    medição.
+
+    O import é local porque o analytics é consumidor do publish (mede o que foi
+    publicado); trazê-lo para o topo deste módulo criaria a dependência na
+    direção errada.
     """
-    return {}
+    from analytics import recalibrate
+
+    try:
+        return recalibrate.pesos_por_horario(conn)
+    except Exception as e:
+        # Peso é otimização, não requisito: sem ele a agenda continua saindo
+        # na ordem do relógio. Derrubar o agendamento por causa disso pararia
+        # a publicação inteira.
+        log.warning("Pesos de horário indisponíveis (%s); usando a ordem do "
+                    "relógio.", e)
+        return {}
 
 
 def ordenar_por_peso(horarios, pesos):

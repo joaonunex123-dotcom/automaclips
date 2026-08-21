@@ -122,6 +122,59 @@ INTERVALO_PUBLISH_MIN = _int("INTERVALO_PUBLISH_MIN", 15)
 # Analytics roda uma vez por dia (etapa 7). Hora local, formato HH:MM.
 HORARIO_ANALYTICS = _caminho("HORARIO_ANALYTICS", "05:00")
 
+# --- analytics e recalibracao (etapa 7) ---------------------------------------
+
+# Idade minima de um post para ele entrar na recalibracao. Post de duas horas
+# ainda esta na janela de distribuicao inicial da plataforma; comparar um de 2h
+# com um de 3 dias mede a idade, nao a qualidade do clip.
+ANALYTICS_IDADE_MINIMA_H = _float("ANALYTICS_IDADE_MINIMA_H", 48.0)
+
+# Ate quando remedir um post. Depois disso a curva ja estabilizou e cada
+# medicao nova gasta quota para confirmar o que ja se sabe.
+ANALYTICS_IDADE_MAXIMA_H = _float("ANALYTICS_IDADE_MAXIMA_H", 720.0)
+
+# Piso do denominador do desempenho (views por hora), mesma logica do score de
+# sourcing: sem ele um post de 20 minutos com 50 views marca 150/h e lidera o
+# ranking por ruido de amostragem.
+ANALYTICS_HORAS_MINIMAS = _float("ANALYTICS_HORAS_MINIMAS", 6.0)
+
+# Retencao media exige a YouTube Analytics API, que e OUTRO escopo de OAuth
+# (yt-analytics.readonly) e outra autorizacao. Desligada por padrao: sem ela a
+# coluna `retencao` fica NULL e a recalibracao de duracao degrada para
+# views/hora por faixa, que e pior mas nao e chute.
+ANALYTICS_RETENCAO = _bool("ANALYTICS_RETENCAO", False)
+
+# --- recalibracao: quanto dado e "dado suficiente" ----------------------------
+#
+# Todos os minimos abaixo existem pelo mesmo motivo: recalibrar com tres clips
+# nao aprende nada e ainda estraga o que estava funcionando. Abaixo do minimo,
+# cada recalibracao simplesmente NAO acontece e o default do settings continua
+# valendo.
+
+# Few-shot: percentil de corte e quantos clips medidos sao necessarios antes de
+# alimentar o prompt do highlight_detect.
+RECALIBRAR_PERCENTIL_TOPO = _float("RECALIBRAR_PERCENTIL_TOPO", 90.0)
+RECALIBRAR_MIN_CLIPS = _int("RECALIBRAR_MIN_CLIPS", 20)
+RECALIBRAR_MAX_EXEMPLOS = _int("RECALIBRAR_MAX_EXEMPLOS", 5)
+
+# Desativacao de canal: minimo de clips DAQUELE canal, e o quao abaixo da
+# mediana geral ele precisa estar. 0.5 = rende menos da metade do tipico.
+RECALIBRAR_MIN_CLIPS_CANAL = _int("RECALIBRAR_MIN_CLIPS_CANAL", 5)
+RECALIBRAR_FRACAO_CANAL_RUIM = _float("RECALIBRAR_FRACAO_CANAL_RUIM", 0.5)
+
+# Duracao ideal: largura da faixa em segundos, e minimo de clips por faixa para
+# ela ser comparavel.
+RECALIBRAR_FAIXA_DURACAO_S = _float("RECALIBRAR_FAIXA_DURACAO_S", 10.0)
+RECALIBRAR_MIN_CLIPS_FAIXA = _int("RECALIBRAR_MIN_CLIPS_FAIXA", 5)
+
+# Pesos de horario para o scheduler: minimo de posts naquele horario.
+RECALIBRAR_MIN_POSTS_HORARIO = _int("RECALIBRAR_MIN_POSTS_HORARIO", 3)
+
+# Chaves gravadas na tabela `calibracao`.
+CALIBRACAO_DURACAO_MIN = "clip_duracao_minima_s"
+CALIBRACAO_DURACAO_MAX = "clip_duracao_maxima_s"
+CALIBRACAO_LICOES = "licoes_do_historico"
+
 # --- caminhos -----------------------------------------------------------------
 
 DB_PATH = _caminho("CLIPS_DB_PATH", os.path.join(_BASE_DIR, "clips.db"))

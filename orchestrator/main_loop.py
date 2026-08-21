@@ -77,13 +77,24 @@ def etapa_publish(conn):
 
 
 def etapa_analytics(conn):
-    """Etapa 7. Existe aqui para o laço já ter o lugar dela.
+    """Mede o que foi publicado e recalibra a seleção com o resultado.
 
-    Vazia de propósito: um esboço que fingisse medir engajamento produziria
-    números inventados, e a recalibração passaria a confiar neles.
+    Medir ANTES de recalibrar, no mesmo ciclo: recalibrar sobre o histórico de
+    ontem desperdiçaria um dia inteiro de medição que já está disponível.
+
+    As duas metades são independentes de propósito — se a coleta falhar (API
+    fora, token vencido), a recalibração ainda roda sobre o que já foi medido
+    antes, que continua sendo dado válido.
     """
-    log.info("Analytics ainda não implementado (etapa 7).")
-    return {}
+    from analytics import coletar, recalibrate
+
+    medidos = {}
+    try:
+        medidos = coletar.coletar(conn)
+    except Exception as e:
+        log.warning("Coleta de métricas falhou: %s", e)
+
+    return {"medidos": medidos, "recalibracao": recalibrate.recalibrar(conn)}
 
 
 # (nome, função, nome do setting com o intervalo em minutos)

@@ -4,9 +4,9 @@ Pipeline automatizado de clips verticais: descobre vídeos em alta nos canais
 monitorados, recorta os melhores trechos, edita com legenda e SFX, publica e
 recalibra a seleção com base no que performou.
 
-Estado: **etapa 6 de 7** — pipeline completo, rodando sozinho no relógio.
-A publicação real está **construída mas desligada**: `AUTO_PUBLISH=false` é o
-padrão, e virar essa chave é decisão sua. Falta a etapa 7 (analytics).
+Estado: **as 7 etapas entregues**, rodando sozinho no relógio e recalibrando
+a seleção com o que performou. A publicação real está **construída mas
+desligada**: `AUTO_PUBLISH=false` é o padrão, e virar essa chave é decisão sua.
 
 ## Instalação
 
@@ -248,6 +248,52 @@ apontando qual**, antes do primeiro render. Pular o efeito em silêncio
 produziria um defeito que só aparece assistindo, muito depois de a fila
 inteira ter rodado.
 
+## O laço fechado: analytics e recalibração
+
+```bash
+python -m analytics.analisar             # mede e recalibra
+python -m analytics.analisar --simular   # mostra o que mudaria, sem mudar
+```
+
+Mede cada post publicado (uma linha nova em `resultados` por coleta — histórico,
+não estado) e transforma o resultado em quatro ajustes, cada um fechando um
+ponto que as etapas anteriores deixaram aberto de propósito:
+
+| recalibração | alimenta |
+| --- | --- |
+| top 10% viram few-shot | o prompt do `highlight_detect` |
+| canais fracos | `sourcing/canais.json` (`ativo: false`) |
+| faixa de duração ideal | `select_clips`, via tabela `calibracao` |
+| pesos por horário | `publish/scheduler.pesos_do_historico` |
+
+**Toda recalibração tem um mínimo de amostras, e abaixo dele ela não
+acontece.** Não é cautela genérica: recalibrar com três clips não aprende nada
+e ainda estraga o que estava funcionando. Sem dado, o default do `settings`
+continua valendo — um banco sem medição nenhuma se comporta exatamente como
+antes desta etapa existir.
+
+**Desempenho é views por hora**, não views cruas, pelo mesmo motivo do score de
+sourcing: o acumulado premiaria o post mais antigo. E é normalizado pela
+mediana da **própria plataforma** — YouTube e Instagram têm escalas tão
+diferentes que misturá-los faria uma plataforma vencer sempre.
+
+Canal fraco é julgado pela **mediana**, não pela média: um único clip que
+viralizou levantaria a média de um canal que não rende, e é justamente o canal
+que acerta uma vez a cada vinte que se quer desligar. E ele é *desativado*, não
+removido — a linha fica no arquivo com o motivo, e reativar é trocar uma
+palavra.
+
+Os valores aprendidos vão para a tabela `calibracao`, não para o `.env`: o
+`.env` é território do humano (guarda segredo, é editado à mão), e um valor que
+o programa reescreve ali viraria conflito na primeira vez que alguém abrisse o
+arquivo. Apagar a linha devolve o default.
+
+**Retenção fica de fora por padrão.** `averageViewPercentage` só existe na
+YouTube Analytics API, que é outro escopo de OAuth. Sem ela a recalibração de
+duração degrada para views/hora por faixa — pior, porque mede alcance e não o
+quanto o clip segurou, mas continua sendo medição e não palpite.
+`ANALYTICS_RETENCAO=1` liga, depois de autorizar o escopo extra.
+
 ## Rodando sozinho
 
 ```bash
@@ -376,6 +422,10 @@ publish/preflight.py         confere se a publicação real pode ser ligada
 
 orchestrator/main_loop.py    roda tudo no relógio, com falha isolada
 
+analytics/coletar.py         mede a performance de cada post
+analytics/recalibrate.py     as quatro recalibrações
+analytics/analisar.py        mede e recalibra
+
 assets/sfx/                  os arquivos de efeito (fora do git)
 ```
 
@@ -432,6 +482,6 @@ qualquer commit.
    word-by-word~~
 4. ~~SFX (whoosh nos cortes, ding/pop nos picos)~~
 5. ~~`publish/` em modo sombra (`AUTO_PUBLISH=false`: gera e não posta)~~
-6. **Publicação real com `scheduler.py`, respeitando quota** ← aqui (construída, desligada)
-7. `analytics/` + `recalibrate.py` — top 10% viram few-shot no prompt, canais
-   ruins saem do `canais.json`
+6. ~~Publicação real com `scheduler.py`, respeitando quota~~ (construída, desligada)
+7. ~~`analytics/` + `recalibrate.py` — top 10% viram few-shot no prompt, canais
+   ruins saem do `canais.json`~~

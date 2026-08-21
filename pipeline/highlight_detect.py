@@ -99,7 +99,7 @@ quem está rolando o feed parar."""
 
 
 def montar_sistema(exemplos=None, duracao_min=None, duracao_max=None,
-                   quantidade=None):
+                   quantidade=None, licoes=""):
     """Monta o system prompt. Estável entre vídeos — é o que o cache guarda.
 
     `exemplos` é a lista de few-shot que a etapa 7 (recalibrate) preenche com
@@ -126,6 +126,12 @@ def montar_sistema(exemplos=None, duracao_min=None, duracao_max=None,
             partes.append(
                 f"- \"{ex.get('hook_text', '')}\" — {ex.get('motivo', '')}"
             )
+    if (licoes or "").strip():
+        # Sai da etapa 7, do que separou os clips que renderam dos que não
+        # renderam. DEPOIS dos exemplos de propósito: o exemplo concreto é o
+        # sinal forte, e a lição em texto é o resumo dele — invertida, a frase
+        # genérica leria como a regra e os exemplos como ilustração.
+        partes += ["", "O que tem funcionado neste canal:", licoes.strip()]
     return "\n".join(partes)
 
 
@@ -208,7 +214,7 @@ def _sanear(trechos):
 
 def detectar(transcricao_texto, cliente=None, exemplos=None, modelo=None,
              max_tokens=None, effort=None, usar_fallbacks=None,
-             limite_tokens=None, conn=None, referencia=""):
+             limite_tokens=None, conn=None, referencia="", licoes=""):
     """Trechos candidatos a partir da transcrição já formatada.
 
     Devolve dicts no vocabulário do banco (inicio_s, fim_s, score_claude,
@@ -225,7 +231,7 @@ def detectar(transcricao_texto, cliente=None, exemplos=None, modelo=None,
         raise ErroHighlight("transcrição vazia — nada a analisar.")
 
     cliente = cliente if cliente is not None else construir_cliente()
-    sistema = montar_sistema(exemplos)
+    sistema = montar_sistema(exemplos, licoes=licoes)
 
     limite = settings.TRANSCRICAO_MAX_TOKENS if limite_tokens is None else limite_tokens
     tokens = contar_tokens(cliente, sistema, transcricao_texto, modelo=modelo)
