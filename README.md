@@ -167,8 +167,24 @@ qual rodou.
 
 | backend | quando |
 | --- | --- |
-| `local` (faster-whisper) | sem custo; em CPU, transcrever 4 h leva horas |
+| `youtube` | **o mais barato**: a legenda que o YouTube já tem. Sem chave, sem modelo, sem CPU |
+| `local` (faster-whisper) | sem custo em dinheiro; em CPU, transcrever 4 h leva horas |
 | `openai` (Whisper API) | minutos em vez de horas; cobrado por minuto de áudio |
+
+**O backend `youtube` resolve o gargalo sem gastar nada** quando a fonte é
+podcast — quase todos têm legenda. A escolha entre os dois tipos não é óbvia:
+a **automática** traz timestamp por PALAVRA (a única que permite a legenda
+word-by-word do template) com texto pior; a **manual** traz texto muito melhor
+e timestamp só por frase. O padrão é automática, porque o destaque é o que o
+template promete.
+
+O formato das automáticas é *rolante* — cada bloco repete o texto do anterior
+em linhas próprias. Ler ingenuamente triplica cada palavra, e deduplicar só
+por tempo não salva (o texto repetido recebe o tempo do bloco atual e passa
+como fala nova). Ver `parse_vtt`.
+
+`youtube` **não** entra na escolha automática: ele depende de o vídeo ter
+legenda, o que só se descobre tentando. Quem quer, pede.
 
 `TRANSCRICAO_BACKEND` vazio decide sozinho: usa a API quando há
 `OPENAI_API_KEY` no ambiente, cai no local quando não há. Fixar a API como
@@ -399,6 +415,7 @@ sourcing/descobrir.py        decide o status e orquestra a varredura
 pipeline/download.py         yt-dlp + extração do áudio de trabalho
 pipeline/transcribe.py       faster-whisper local, e a escolha de backend
 pipeline/whisper_api.py      Whisper API: compressão, fatiamento, custo
+pipeline/legendas_youtube.py legenda do YouTube como transcrição (de graça)
 pipeline/energia.py          picos de RMS (só carregar_audio toca o librosa)
 pipeline/claude_cliente.py   fiação comum das chamadas ao Claude
 pipeline/highlight_detect.py Claude sobre a transcrição

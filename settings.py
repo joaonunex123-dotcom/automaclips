@@ -67,6 +67,14 @@ def _caminho(nome, padrao):
     return bruto or padrao
 
 
+def _lista(nome, padrao):
+    """Lista separada por vírgula no ambiente. Vazio cai no default."""
+    bruto = (os.getenv(nome) or "").strip()
+    if not bruto:
+        return list(padrao)
+    return [item.strip() for item in bruto.split(",") if item.strip()]
+
+
 # --- chaves de API ------------------------------------------------------------
 #
 # Lidas por getenv direto (sem default) porque não existe valor razoável de
@@ -289,6 +297,27 @@ OPENAI_CORTE_SILENCIO_MIN_S = _float("OPENAI_CORTE_SILENCIO_MIN_S", 0.35)
 # Quanto o corte pode se afastar do alvo para achar silêncio.
 OPENAI_CORTE_TOLERANCIA_S = _float("OPENAI_CORTE_TOLERANCIA_S", 120.0)
 
+# --- transcricao pelas legendas do YouTube ------------------------------------
+#
+# O backend mais barato dos tres: nao usa modelo, nao gasta API, nao gasta CPU.
+# O yt-dlp busca a legenda que o proprio YouTube ja tem, sem chave nenhuma.
+#
+# Idiomas tentados, na ordem. O yt-dlp aceita curinga ('pt.*' pega pt, pt-BR e
+# pt-PT), o que evita perder legenda por causa da variante do codigo.
+YOUTUBE_LEGENDAS_IDIOMAS = _lista(
+    "YOUTUBE_LEGENDAS_IDIOMAS", ["pt-BR", "pt", "pt.*", "en"]
+)
+
+# 'auto' | 'manual', e a escolha NAO e obvia:
+#   auto    legenda gerada por reconhecimento de fala. Texto pior (erra nome
+#           proprio, nao pontua), mas e a UNICA que traz timestamp por PALAVRA
+#           -- sem ele, a legenda word-by-word do template nao existe.
+#   manual  legenda enviada pelo canal. Texto muito melhor, timestamp so por
+#           frase: o clip sai legendado e sincronizado, sem o destaque andando.
+#
+# Padrao 'auto' porque o destaque e o que o template promete.
+YOUTUBE_LEGENDAS_PREFERIR = _caminho("YOUTUBE_LEGENDAS_PREFERIR", "auto")
+
 # --- orçamento da API paga ----------------------------------------------------
 #
 # Preço publicado do whisper-1, em USD por minuto de áudio. CONFERIR contra a
@@ -412,14 +441,6 @@ RENDER_DIR = _caminho("CLIPS_RENDER_DIR", os.path.join(_BASE_DIR, "render"))
 # Clips renderizados por execução. Render é a etapa mais cara em tempo de CPU
 # do pipeline inteiro; o teto existe para a execução ter fim previsível.
 EDITING_MAX_CLIPS = _int("EDITING_MAX_CLIPS", 10)
-
-
-def _lista(nome, padrao):
-    """Lista separada por vírgula no ambiente. Vazio cai no default."""
-    bruto = (os.getenv(nome) or "").strip()
-    if not bruto:
-        return list(padrao)
-    return [item.strip() for item in bruto.split(",") if item.strip()]
 
 
 # --- publish (etapa 5) --------------------------------------------------------

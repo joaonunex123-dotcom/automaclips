@@ -138,6 +138,8 @@ def texto_com_timestamps(transcricao, casas=1):
 
 BACKEND_LOCAL = "local"
 BACKEND_OPENAI = "openai"
+BACKEND_YOUTUBE = "youtube"
+BACKENDS = (BACKEND_LOCAL, BACKEND_OPENAI, BACKEND_YOUTUBE)
 
 
 def backend_ativo(backend=None):
@@ -150,13 +152,17 @@ def backend_ativo(backend=None):
     """
     escolhido = (backend if backend is not None else settings.TRANSCRICAO_BACKEND)
     escolhido = (escolhido or "").strip().lower()
-    if escolhido in (BACKEND_LOCAL, BACKEND_OPENAI):
+    if escolhido in BACKENDS:
         return escolhido
     if escolhido:
         raise ErroTranscricao(
             f"TRANSCRICAO_BACKEND inválido: {escolhido!r} "
-            f"(use {BACKEND_LOCAL!r} ou {BACKEND_OPENAI!r})."
+            f"(use um de {BACKENDS})."
         )
+    # 'youtube' NÃO entra na escolha automática, de propósito: ele depende de o
+    # vídeo ter legenda, o que só se descobre tentando. Um padrão que às vezes
+    # não existe faria o pipeline falhar em vídeo aleatório sem ninguém ter
+    # escolhido isso — quem quer legenda do YouTube pede por ela.
     return BACKEND_OPENAI if settings.OPENAI_API_KEY else BACKEND_LOCAL
 
 
@@ -177,7 +183,17 @@ def transcrever_para_arquivo(audio_path, video_id, duracao_s=0.0, destino_dir=No
         log.info("Transcrição já existe: %s", destino)
         return destino, carregar(destino)
 
-    if backend_ativo(backend) == BACKEND_OPENAI:
+    escolhido = backend_ativo(backend)
+    if escolhido == BACKEND_YOUTUBE:
+        from pipeline import legendas_youtube
+
+        # O mais barato dos três: nenhuma chave, nenhum modelo, nenhuma CPU —
+        # a legenda que o próprio YouTube já tem.
+        transcricao = legendas_youtube.transcrever(
+            audio_path, duracao_s=duracao_s, video_id=video_id,
+            destino_dir=destino_dir,
+        )
+    elif escolhido == BACKEND_OPENAI:
         from pipeline import whisper_api
 
         transcricao = whisper_api.transcrever(
