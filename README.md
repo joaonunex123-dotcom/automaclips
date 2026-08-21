@@ -4,9 +4,9 @@ Pipeline automatizado de clips verticais: descobre vídeos em alta nos canais
 monitorados, recorta os melhores trechos, edita com legenda e SFX, publica e
 recalibra a seleção com base no que performou.
 
-Estado: **etapa 5 de 7** — do canal monitorado ao clip agendado, com metadado
-gerado. Em **modo sombra**: nada é publicado até `AUTO_PUBLISH=true`. As etapas
-seguintes estão listadas em [Roadmap](#roadmap).
+Estado: **etapa 6 de 7** — pipeline completo, rodando sozinho no relógio.
+A publicação real está **construída mas desligada**: `AUTO_PUBLISH=false` é o
+padrão, e virar essa chave é decisão sua. Falta a etapa 7 (analytics).
 
 ## Instalação
 
@@ -248,6 +248,63 @@ apontando qual**, antes do primeiro render. Pular o efeito em silêncio
 produziria um defeito que só aparece assistindo, muito depois de a fila
 inteira ter rodado.
 
+## Rodando sozinho
+
+```bash
+python -m orchestrator.main_loop --uma-vez   # um ciclo e sai
+python -m orchestrator.main_loop             # fica de pé (APScheduler)
+```
+
+| etapa | ritmo |
+| --- | --- |
+| sourcing | 6 h |
+| pipeline | 1 h |
+| editing | 1 h |
+| publish | 15 min |
+| analytics | 1x/dia (etapa 7) |
+
+Falha em uma etapa **não derruba o laço**: cada uma roda no próprio
+try/except, o erro fica no log com o nome da etapa e a execução continua. Um
+canal fora do ar não pode impedir que os clips já renderizados sejam
+publicados.
+
+Prefira `--uma-vez` sob o Task Scheduler ou cron: o modo residente é mais
+simples de começar, mas se o processo morrer ninguém o levanta — e num
+pipeline que publica em horário marcado isso é perder a janela sem aviso.
+`--uma-vez` também não precisa do APScheduler instalado.
+
+## Ligando a publicação real
+
+**O padrão é `AUTO_PUBLISH=false`.** Post público não tem desfazer, então a
+chave é sua para virar. Antes:
+
+```bash
+python -m orchestrator.main_loop --verificar
+```
+
+Lista **todos** os impedimentos de uma vez, cada um com o comando ou a
+variável que resolve — quem está ligando a publicação quer resolver tudo numa
+sentada, não descobrir mais um item a cada execução. Sai com código 1 enquanto
+houver bloqueio.
+
+Depois de ligar, três freios independentes seguram o que a configuração
+sozinha não segura:
+
+| freio | o que cobre |
+| --- | --- |
+| `PARAR_PUBLICACAO` (arquivo na raiz) | emergência: bloqueia tudo na hora, sem editar `.env` nem parar processo |
+| `MAX_POSTS_DIA_ABSOLUTO` | bug de agenda: o scheduler confia na própria agenda, este número não |
+| `AQUECIMENTO_POSTS_DIA` | os primeiros dias no volume cheio, antes de ver como os clips performam |
+
+Os três **adiam**, não descartam: o post continua `agendado` e sai quando o
+freio soltar. Freio que descarta post é freio que perde clip. E a parada de
+emergência é checada antes de tudo, inclusive antes do `AUTO_PUBLISH` —
+emergência não negocia com configuração.
+
+O relógio do aquecimento começa no **primeiro post que foi ao ar**, não na
+data em que a flag foi ligada: ligar, esquecer uma semana e depois publicar no
+volume cheio é exatamente o que ele existe para evitar.
+
 ## Publicação e modo sombra
 
 O `publicar` faz duas coisas separadas de propósito: **agendar** (gerar o
@@ -315,6 +372,9 @@ publish/quota.py             quota diária do YouTube (dia do Pacífico)
 publish/youtube.py           upload via OAuth
 publish/instagram.py         Reels e renovação do token
 publish/publicar.py          agenda, publica ou simula
+publish/preflight.py         confere se a publicação real pode ser ligada
+
+orchestrator/main_loop.py    roda tudo no relógio, com falha isolada
 
 assets/sfx/                  os arquivos de efeito (fora do git)
 ```
@@ -371,7 +431,7 @@ qualquer commit.
 3. ~~`editing/` — template fixo em `template_config.json`, reframe + legendas
    word-by-word~~
 4. ~~SFX (whoosh nos cortes, ding/pop nos picos)~~
-5. **`publish/` em modo sombra (`AUTO_PUBLISH=false`: gera e não posta)** ← aqui
-6. Publicação real com `scheduler.py`, respeitando quota
+5. ~~`publish/` em modo sombra (`AUTO_PUBLISH=false`: gera e não posta)~~
+6. **Publicação real com `scheduler.py`, respeitando quota** ← aqui (construída, desligada)
 7. `analytics/` + `recalibrate.py` — top 10% viram few-shot no prompt, canais
    ruins saem do `canais.json`

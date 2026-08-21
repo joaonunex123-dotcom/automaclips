@@ -553,6 +553,39 @@ def proximas_publicacoes(conn, limite=10):
     ).fetchall()
 
 
+def posts_publicados_no_dia(conn, plataforma=None, dia=None):
+    """Quantos posts SAIRAM de verdade num dia (YYYY-MM-DD local).
+
+    Conta so 'publicado': 'simulado' nao gastou nada e nao pode consumir o teto
+    do dia real — senao uma semana de modo sombra bloquearia o primeiro dia de
+    publicacao de verdade.
+    """
+    sql = ("SELECT COUNT(*) FROM publicacoes WHERE status = ?"
+           " AND publicado_em IS NOT NULL")
+    parametros = [PUB_PUBLICADO]
+    if plataforma is not None:
+        sql += " AND plataforma = ?"
+        parametros.append(plataforma)
+    if dia is not None:
+        sql += " AND date(publicado_em) = ?"
+        parametros.append(dia)
+    return int(conn.execute(sql, parametros).fetchone()[0])
+
+
+def primeiro_post_publicado(conn):
+    """Data do primeiro post real, ou None se nenhum saiu ainda.
+
+    E daqui que sai a contagem do periodo de aquecimento: o relogio comeca no
+    primeiro post que foi ao ar, nao na data em que alguem ligou a flag.
+    """
+    linha = conn.execute(
+        "SELECT MIN(date(publicado_em)) FROM publicacoes"
+        " WHERE status = ? AND publicado_em IS NOT NULL",
+        (PUB_PUBLICADO,),
+    ).fetchone()
+    return linha[0] if linha and linha[0] else None
+
+
 # --- quota de API -------------------------------------------------------------
 
 def quota_usada(conn, servico, dia):

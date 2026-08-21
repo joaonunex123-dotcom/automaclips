@@ -23,13 +23,14 @@ import argparse
 import json
 import logging
 import sys
-from datetime import datetime
+from datetime import date, datetime
 
 import settings
 from db import repositorio
 from pipeline import transcribe as transcribe_mod
 from publish import instagram as instagram_mod
 from publish import metadata as metadata_mod
+from publish import preflight
 from publish import quota
 from publish import scheduler
 from publish import youtube as youtube_mod
@@ -174,6 +175,57 @@ ENVIADORES = {
 }
 
 
+# Chave de contagem, nao status de banco: o item ADIADO continua 'agendado' e
+# sai na proxima execucao. Freio que descarta post e freio que perde clip.
+ADIADO = "adiado"
+
+
+def limite_de_aquecimento(conn, agora):
+    """Teto de posts/dia enquanto o canal esta aquecendo. None = acabou.
+
+    O relogio comeca no PRIMEIRO POST QUE FOI AO AR, nao na data em que alguem
+    ligou a flag: ligar, esquecer uma semana e depois publicar no volume cheio
+    seria exatamente o que o aquecimento existe para evitar.
+    """
+    if not settings.AQUECIMENTO_POSTS_DIA:
+        return None
+    primeiro = repositorio.primeiro_post_publicado(conn)
+    if primeiro is None:
+        return settings.AQUECIMENTO_POSTS_DIA
+    try:
+        inicio = date.fromisoformat(primeiro)
+    except ValueError:
+        return settings.AQUECIMENTO_POSTS_DIA
+    if (agora.date() - inicio).days >= settings.AQUECIMENTO_DIAS:
+        return None
+    return settings.AQUECIMENTO_POSTS_DIA
+
+
+def freio_ativo(conn, plataforma, agora):
+    """Motivo para NAO publicar agora, ou None. Ordem importa.
+
+    A parada de emergencia vem primeiro, antes ate do AUTO_PUBLISH: emergencia
+    nao negocia com configuracao. Os tetos vem depois, e sao independentes do
+    scheduler de proposito — ele confia na propria agenda, e se um bug marcar
+    quinze posts para hoje e aqui que os quinze param.
+    """
+    if preflight.parada_de_emergencia_ativa():
+        return f"parada de emergencia ativa ({settings.ARQUIVO_PARAR_PUBLICACAO})"
+
+    dia = agora.date().isoformat()
+    publicados = repositorio.posts_publicados_no_dia(conn, plataforma, dia)
+
+    teto = settings.MAX_POSTS_DIA_ABSOLUTO
+    if teto and publicados >= teto:
+        return f"teto de {teto} posts/dia em {plataforma} ja atingido"
+
+    aquecimento = limite_de_aquecimento(conn, agora)
+    if aquecimento is not None and publicados >= aquecimento:
+        return (f"aquecimento: maximo {aquecimento} post(s)/dia nos primeiros "
+                f"{settings.AQUECIMENTO_DIAS} dias")
+    return None
+
+
 def processar_vencidas(conn, agora=None, limite=None, enviadores=None,
                        auto_publish=None):
     """Publica (ou simula) o que já venceu. Devolve {status: quantidade}."""
@@ -207,6 +259,14 @@ def processar_vencidas(conn, agora=None, limite=None, enviadores=None,
             )
             log.info("[sombra] %s: %r ficaria pronto para %s.",
                      plataforma, linha["titulo"], linha["agendado_para"])
+            continue
+
+        travado = freio_ativo(conn, plataforma, agora)
+        if travado:
+            # Continua 'agendado': o freio ADIA, nao descarta. Marcar falha
+            # aqui queimaria o clip por causa de um teto que vira amanha.
+            log.warning("Publicacao %s adiada — %s", linha["id"], travado)
+            contagem[ADIADO] = contagem.get(ADIADO, 0) + 1
             continue
 
         if not (linha["render_path"] or ""):

@@ -83,6 +83,45 @@ OPENROUTER_API_KEY = (os.getenv("OPENROUTER_API_KEY") or "").strip()
 # para o algoritmo), o de um clip ruim renderizado é um arquivo em disco.
 AUTO_PUBLISH = _bool("AUTO_PUBLISH", False)
 
+# --- publish: freios da publicacao real (etapa 6) -----------------------------
+#
+# A partir daqui o programa produz post PUBLICO e irreversivel. Os tres freios
+# abaixo sao independentes de proposito: cada um cobre uma falha que os outros
+# nao cobrem.
+
+# 1) Freio de emergencia. A presenca deste arquivo na raiz bloqueia TODA
+# publicacao na hora, sem precisar editar .env nem parar processo. Checado
+# ANTES de qualquer outra coisa, inclusive antes do AUTO_PUBLISH: emergencia
+# nao negocia com configuracao. Nao versionado (ver .gitignore).
+ARQUIVO_PARAR_PUBLICACAO = os.path.join(_BASE_DIR, "PARAR_PUBLICACAO")
+
+# 2) Teto absoluto por dia e por plataforma, independente do scheduler. O
+# scheduler ja limita pelos horarios, mas ele confia na propria agenda; se um
+# bug marcar quinze posts para o mesmo dia, e este numero que impede os quinze
+# de sairem. Backstop, nao configuracao de ritmo -- deixe folgado em relacao a
+# POSTS_POR_DIA.
+MAX_POSTS_DIA_ABSOLUTO = _int("MAX_POSTS_DIA_ABSOLUTO", 6)
+
+# 3) Periodo de aquecimento: nos primeiros dias de publicacao real, no maximo
+# este numero de posts por dia. Publicar no volume cheio antes de ver como os
+# primeiros clips performam e apostar a reputacao do canal num template que
+# ninguem conferiu. 0 desliga.
+AQUECIMENTO_POSTS_DIA = _int("AQUECIMENTO_POSTS_DIA", 1)
+# Quantos dias o aquecimento dura, contados do primeiro post publicado.
+AQUECIMENTO_DIAS = _int("AQUECIMENTO_DIAS", 3)
+
+# --- orchestrator (etapa 6) ---------------------------------------------------
+#
+# Intervalos do laco principal, em minutos. O sourcing e o unico que segue o
+# ritmo do spec (a cada 6h); os outros rodam mais vezes porque processam fila e
+# uma passada vazia custa quase nada.
+INTERVALO_SOURCING_MIN = _int("INTERVALO_SOURCING_MIN", 360)
+INTERVALO_PIPELINE_MIN = _int("INTERVALO_PIPELINE_MIN", 60)
+INTERVALO_EDITING_MIN = _int("INTERVALO_EDITING_MIN", 60)
+INTERVALO_PUBLISH_MIN = _int("INTERVALO_PUBLISH_MIN", 15)
+# Analytics roda uma vez por dia (etapa 7). Hora local, formato HH:MM.
+HORARIO_ANALYTICS = _caminho("HORARIO_ANALYTICS", "05:00")
+
 # --- caminhos -----------------------------------------------------------------
 
 DB_PATH = _caminho("CLIPS_DB_PATH", os.path.join(_BASE_DIR, "clips.db"))

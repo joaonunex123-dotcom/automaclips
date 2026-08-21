@@ -34,4 +34,8 @@ requests>=2.31.0
 # código recua para UTC-8 fixo e avisa, mas o certo é ter a base.
 tzdata>=2024.1
 
+# Etapa 6 - orchestrator. Opcional na pratica: `--uma-vez` sob o
+# agendador do sistema (cron / Task Scheduler) nao precisa dela.
+APScheduler>=3.10.0
+
 pytest>=7.0.0

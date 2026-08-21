@@ -6,6 +6,10 @@
 credentials.json
 token.json
 
+# Freio de emergencia: a presenca deste arquivo bloqueia toda
+# publicacao. E estado da maquina, nao do projeto.
+PARAR_PUBLICACAO
+
 # Banco: fonte de verdade em runtime, não artefato de código. Os arquivos
 # -wal/-shm são do WAL mode e mudam a cada escrita.
 *.db
