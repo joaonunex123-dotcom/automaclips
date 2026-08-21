@@ -19,6 +19,7 @@ import os
 import settings
 from db import repositorio
 from publish import quota
+from publish import tiktok as tiktok_mod
 
 log = logging.getLogger(__name__)
 
@@ -101,6 +102,72 @@ def _checar_instagram(conn):
     return problemas
 
 
+def _checar_tiktok(conn):
+    """O que precisa estar de pé para o TikTok aceitar um post.
+
+    O item que mais confunde é o último: um app que ainda não passou pela
+    revisão da TikTok publica SEMPRE em SELF_ONLY, visível só para a própria
+    conta. Não é bug, não tem contorno, e o único jeito de sair disso é a
+    revisão ser aprovada — o que leva dias ou semanas. Melhor ler isso aqui,
+    antes de ligar, do que concluir que a integração está quebrada quando o
+    primeiro post sair privado.
+    """
+    problemas = []
+    if not (settings.TIKTOK_CLIENT_KEY and settings.TIKTOK_CLIENT_SECRET):
+        problemas.append(_item(
+            BLOQUEIO, "tiktok",
+            "TIKTOK_CLIENT_KEY/TIKTOK_CLIENT_SECRET vazias",
+            "crie o app em developers.tiktok.com e preencha no .env",
+        ))
+
+    tem_token = bool(settings.TIKTOK_ACCESS_TOKEN) or bool(
+        repositorio.obter_token(conn, tiktok_mod.SERVICO)
+    )
+    if not tem_token:
+        problemas.append(_item(
+            BLOQUEIO, "tiktok", "sem access token",
+            "preencha TIKTOK_ACCESS_TOKEN no .env",
+        ))
+
+    tem_refresh = bool(settings.TIKTOK_REFRESH_TOKEN) or bool(
+        repositorio.obter_token(conn, tiktok_mod.SERVICO_REFRESH)
+    )
+    if not tem_refresh:
+        # Aviso e não bloqueio: o post de hoje sai. O de amanhã é que não.
+        problemas.append(_item(
+            AVISO, "tiktok",
+            "sem refresh token: o access token do TikTok vale ~24 h, e sem "
+            "renovar a fila para sozinha amanhã.",
+            "preencha TIKTOK_REFRESH_TOKEN no .env",
+        ))
+
+    modo = (settings.TIKTOK_MODO_UPLOAD or "").lower()
+    if modo == tiktok_mod.MODO_URL and not settings.CLIPS_BASE_URL:
+        problemas.append(_item(
+            BLOQUEIO, "tiktok",
+            "TIKTOK_MODO_UPLOAD=url exige CLIPS_BASE_URL, que está vazia.",
+            "configure a URL pública da pasta render/, ou use "
+            "TIKTOK_MODO_UPLOAD=arquivo (envia o arquivo direto)",
+        ))
+
+    if not settings.TIKTOK_APP_AUDITADO:
+        problemas.append(_item(
+            AVISO, "tiktok",
+            "app declarado como NÃO revisado: enquanto a TikTok não aprovar a "
+            "revisão, todo post sai como SELF_ONLY (só você vê). É limitação "
+            "da plataforma, não falha da integração.",
+            "acompanhe a revisão em developers.tiktok.com; quando sair, "
+            "TIKTOK_APP_AUDITADO=true e TIKTOK_PRIVACIDADE=PUBLIC_TO_EVERYONE",
+        ))
+    elif settings.TIKTOK_PRIVACIDADE == tiktok_mod.PRIVADO:
+        problemas.append(_item(
+            AVISO, "tiktok",
+            "privacidade em SELF_ONLY: o vídeo sobe mas só você vê.",
+            "TIKTOK_PRIVACIDADE=PUBLIC_TO_EVERYONE quando confiar na fila",
+        ))
+    return problemas
+
+
 def verificar(conn, plataformas=None, agora=None):
     """Lista de problemas. Vazia = pronto para publicar de verdade."""
     plataformas = plataformas or settings.PLATAFORMAS
@@ -118,6 +185,8 @@ def verificar(conn, plataformas=None, agora=None):
         problemas += _checar_youtube(conn, agora=agora)
     if settings.PLATAFORMA_INSTAGRAM in plataformas:
         problemas += _checar_instagram(conn)
+    if settings.PLATAFORMA_TIKTOK in plataformas:
+        problemas += _checar_tiktok(conn)
     return problemas
 
 

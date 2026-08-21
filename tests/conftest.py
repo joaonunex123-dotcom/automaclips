@@ -335,15 +335,25 @@ class RespostaFalsa:
 
 
 class HttpFalso:
-    """Duplo do `requests`: registra as chamadas e devolve respostas na ordem."""
+    """Duplo do `requests`: registra as chamadas e devolve respostas na ordem.
+
+    Aceita as quatro formas de corpo que os módulos de publicação usam —
+    query string (Instagram), JSON (TikTok), formulário (OAuth do TikTok) e
+    bytes crus (upload em pedaços) — porque um duplo que só entende `params`
+    faria o teste do TikTok passar por engano, sem nunca olhar o que foi
+    enviado.
+    """
 
     def __init__(self, respostas=None):
         self._respostas = list(respostas or [])
         self.chamadas = []
 
-    def request(self, metodo, url, params=None, timeout=None):
+    def request(self, metodo, url, params=None, json=None, data=None,
+                headers=None, timeout=None):
         self.chamadas.append({"metodo": metodo, "url": url,
-                              "params": dict(params or {})})
+                              "params": dict(params or {}),
+                              "json": json, "data": data,
+                              "headers": dict(headers or {})})
         if self._respostas:
             return self._respostas.pop(0)
         return RespostaFalsa({})

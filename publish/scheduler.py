@@ -6,11 +6,15 @@ engajamento, com horários padrão configuráveis como fallback. Hoje o fallback
 ainda. `pesos_do_historico` já existe e devolve vazio — a etapa 7 a preenche,
 e a ordenação por peso passa a valer sem que nada mais mude.
 
-Duas regras que evitam desperdiçar clip bom:
+Três regras que evitam desperdiçar clip bom:
 
 * **Intervalo mínimo entre posts da mesma plataforma.** Dois clips seguidos
   competem entre si pela mesma audiência no mesmo feed: o segundo pega o
   público que o primeiro acabou de consumir.
+* **Teto de posts por dia, POR PLATAFORMA.** Cada uma tem quota e rate limit
+  próprios — a do YouTube é dura e diária, a do TikTok conta publicações por
+  token, a do Instagram conta chamadas por hora. Um número global obrigaria a
+  mais restrita a ditar o ritmo das outras.
 * **Teto de dias à frente.** Sem ele, uma fila grande marcaria posts para
   daqui a meses, e clip de assunto quente não sobrevive a isso. É melhor
   deixar o excedente sem agendar e reavaliar amanhã, quando ele pode ter sido
@@ -115,38 +119,66 @@ def _muito_perto(momento, ocupados, intervalo_min):
     return any(abs(momento - o) < limite for o in ocupados)
 
 
+def _cheio_no_dia(momento, ocupados, por_dia):
+    """Se aquele dia já bateu o teto de posts DAQUELA plataforma.
+
+    O teto é por plataforma e não global porque as três não têm o mesmo
+    apetite: o YouTube tem quota dura por dia, o TikTok limita publicações por
+    token, e o Instagram limita chamadas por hora. Um número único obrigaria a
+    plataforma mais restrita a ditar o ritmo das outras — que é jogar fora
+    alcance de graça.
+    """
+    if not por_dia:
+        return False
+    return sum(1 for o in ocupados if o.date() == momento.date()) >= por_dia
+
+
 def proximos_slots(conn, plataforma, quantidade, agora=None, horarios=None,
-                   dias_max=None, intervalo_min=None, pesos=None):
+                   dias_max=None, intervalo_min=None, pesos=None,
+                   por_dia=None):
     """Os próximos `quantidade` horários livres da plataforma.
 
     Pode devolver menos do que o pedido — é o que acontece quando a janela de
-    dias acaba antes da fila, e é a resposta certa: o excedente fica sem
-    agendar e concorre de novo amanhã.
+    dias acaba antes da fila, ou quando o teto diário da plataforma fecha os
+    dias que caberiam. É a resposta certa: o excedente fica sem agendar e
+    concorre de novo amanhã.
     """
     agora = agora or datetime.now()
     dias_max = settings.AGENDAMENTO_MAX_DIAS if dias_max is None else dias_max
     if intervalo_min is None:
         intervalo_min = settings.INTERVALO_MINIMO_MIN
+    if por_dia is None:
+        por_dia = settings.posts_por_dia(plataforma)
     pesos = pesos_do_historico(conn) if pesos is None else pesos
 
     do_dia = ordenar_por_peso(horarios_configurados(horarios), pesos)
 
+    # Uma consulta só, dois usos: a contagem por dia olha o DIA INTEIRO (um
+    # post das 9h de hoje já ocupou uma das vagas de hoje), enquanto a
+    # distância mínima só se aplica ao que ainda está por vir — não há como
+    # afastar um horário de um post que já saiu. A janela começa na
+    # meia-noite de hoje porque nenhum candidato é anterior a isso, e trazer o
+    # histórico inteiro cresceria para sempre.
+    inicio_do_dia = formatar(datetime.combine(agora.date(), datetime.min.time()))
     ocupados = []
     for texto in repositorio.horarios_agendados(conn, plataforma,
-                                                desde=formatar(agora)):
+                                                desde=inicio_do_dia):
         try:
             ocupados.append(analisar(texto))
         except (TypeError, ValueError):
             log.warning("Horário agendado ilegível no banco: %r", texto)
+    futuros = [o for o in ocupados if o >= agora]
 
     escolhidos = []
     for momento in candidatos(agora, do_dia, dias_max):
         if len(escolhidos) >= quantidade:
             break
+        if _cheio_no_dia(momento, ocupados + escolhidos, por_dia):
+            continue
         # A comparação é contra os já ocupados NO BANCO e contra os escolhidos
         # nesta mesma rodada: sem a segunda metade, dois clips da mesma
         # execução cairiam em horários vizinhos.
-        if not _muito_perto(momento, ocupados + escolhidos, intervalo_min):
+        if not _muito_perto(momento, futuros + escolhidos, intervalo_min):
             escolhidos.append(momento)
 
     escolhidos.sort()

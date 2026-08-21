@@ -75,6 +75,27 @@ def _lista(nome, padrao):
     return [item.strip() for item in bruto.split(",") if item.strip()]
 
 
+def _mapa_int(nome, padrao=None):
+    """'youtube=3,tiktok=2' -> {'youtube': 3, 'tiktok': 2}.
+
+    Serve aos tetos que são número POR PLATAFORMA. A quota do YouTube, o rate
+    limit do Instagram e o do TikTok são independentes; um número só obrigaria
+    a plataforma mais restrita a ditar o ritmo das outras.
+
+    Item torto é ignorado, um a um, pelo mesmo motivo de `_int`: uma linha
+    copiada pela metade do .env.example não deve derrubar o import — o
+    resolvedor cai no valor global e o pipeline continua de pé.
+    """
+    saida = dict(padrao or {})
+    for item in _lista(nome, []):
+        chave, _, valor = item.partition("=")
+        try:
+            saida[chave.strip()] = int(valor)
+        except ValueError:
+            continue
+    return saida
+
+
 # --- chaves de API ------------------------------------------------------------
 #
 # Lidas por getenv direto (sem default) porque não existe valor razoável de
@@ -109,6 +130,16 @@ ARQUIVO_PARAR_PUBLICACAO = os.path.join(_BASE_DIR, "PARAR_PUBLICACAO")
 # de sairem. Backstop, nao configuracao de ritmo -- deixe folgado em relacao a
 # POSTS_POR_DIA.
 MAX_POSTS_DIA_ABSOLUTO = _int("MAX_POSTS_DIA_ABSOLUTO", 6)
+# Override por plataforma: 'tiktok=4,instagram=2'. Cada plataforma tem quota e
+# rate limit próprios; o global vale para quem não estiver listado.
+MAX_POSTS_DIA_ABSOLUTO_PLATAFORMA = _mapa_int("MAX_POSTS_DIA_ABSOLUTO_PLATAFORMA")
+
+
+def max_posts_dia(plataforma):
+    """O teto absoluto DAQUELA plataforma, caindo no global quando não há."""
+    return MAX_POSTS_DIA_ABSOLUTO_PLATAFORMA.get(plataforma,
+                                                 MAX_POSTS_DIA_ABSOLUTO)
+
 
 # 3) Periodo de aquecimento: nos primeiros dias de publicacao real, no maximo
 # este numero de posts por dia. Publicar no volume cheio antes de ver como os
@@ -473,12 +504,35 @@ EDITING_MAX_CLIPS = _int("EDITING_MAX_CLIPS", 10)
 
 PLATAFORMA_YOUTUBE = "youtube"
 PLATAFORMA_INSTAGRAM = "instagram"
+PLATAFORMA_TIKTOK = "tiktok"
 
-# Para onde publicar. Remover uma daqui é o jeito de rodar só num canal.
-PLATAFORMAS = _lista("PLATAFORMAS", [PLATAFORMA_YOUTUBE, PLATAFORMA_INSTAGRAM])
+# O TikTok entra por uma chave própria e chega DESLIGADO: publicar nele exige
+# um app aprovado na TikTok (ver a seção "publish: TikTok" abaixo), e ligá-lo
+# por padrão faria toda instalação existente passar a agendar posts para uma
+# plataforma que ainda vai recusá-los.
+PUBLICAR_TIKTOK = _bool("PUBLICAR_TIKTOK", False)
 
-# Publicações por dia, por plataforma.
+_PLATAFORMAS_PADRAO = [PLATAFORMA_YOUTUBE, PLATAFORMA_INSTAGRAM]
+if PUBLICAR_TIKTOK:
+    _PLATAFORMAS_PADRAO.append(PLATAFORMA_TIKTOK)
+
+# Para onde publicar. Remover uma daqui é o jeito de rodar só num canal —
+# e uma lista explícita aqui ganha do PUBLICAR_TIKTOK, que só mexe no padrão.
+PLATAFORMAS = _lista("PLATAFORMAS", _PLATAFORMAS_PADRAO)
+
+# Publicações por dia, por plataforma. O número é o RITMO (quantos horários de
+# queda o scheduler pode usar num dia), não o freio: o backstop é o
+# MAX_POSTS_DIA_ABSOLUTO lá em cima.
 POSTS_POR_DIA = _int("POSTS_POR_DIA", 3)
+# Override por plataforma: 'tiktok=4,instagram=2'. Existe porque as três
+# plataformas não têm o mesmo apetite — o YouTube tem quota dura por dia, o
+# TikTok limita publicações por token, e o Instagram, chamadas por hora.
+POSTS_POR_DIA_PLATAFORMA = _mapa_int("POSTS_POR_DIA_PLATAFORMA")
+
+
+def posts_por_dia(plataforma):
+    """Quantos posts por dia DAQUELA plataforma, caindo no global."""
+    return POSTS_POR_DIA_PLATAFORMA.get(plataforma, POSTS_POR_DIA)
 
 # Horários de queda, em HH:MM local. São o FALLBACK: a partir da etapa 7 o
 # scheduler prefere os horários que o histórico de engajamento mostrar
@@ -542,12 +596,75 @@ INSTAGRAM_RENOVAR_ANTES_DIAS = _int("INSTAGRAM_RENOVAR_ANTES_DIAS", 10)
 # fica indisponível (e o modo sombra avisa em vez de falhar no dia D).
 CLIPS_BASE_URL = _caminho("CLIPS_BASE_URL", "")
 
+# --- publish: TikTok ----------------------------------------------------------
+#
+# Content Posting API (open.tiktokapis.com/v2). Não é a API por trás do app de
+# celular: exige um app registrado em developers.tiktok.com com os escopos
+# `video.publish` e `user.info.basic`, e a conta do canal autorizada nele.
+#
+# LIMITAÇÃO DA PLATAFORMA, e não defeito daqui: enquanto o app não passar pela
+# revisão da TikTok, TODO post sai como SELF_ONLY — visível só para a própria
+# conta. Não existe configuração que contorne isso, e a revisão leva dias ou
+# semanas. Ver o cabeçalho de publish/tiktok.py.
+TIKTOK_CLIENT_KEY = _caminho("TIKTOK_CLIENT_KEY", "")
+TIKTOK_CLIENT_SECRET = _caminho("TIKTOK_CLIENT_SECRET", "")
+
+# Access token INICIAL e o refresh que o renova. O access token vale ~24 h —
+# um dia, não os ~60 do Instagram —, então renovar é obrigação do programa:
+# sem refresh token a fila para sozinha amanhã. Depois da primeira renovação
+# os dois valores vigentes passam a viver na tabela `tokens`.
+TIKTOK_ACCESS_TOKEN = _caminho("TIKTOK_ACCESS_TOKEN", "")
+TIKTOK_REFRESH_TOKEN = _caminho("TIKTOK_REFRESH_TOKEN", "")
+TIKTOK_API_BASE = _caminho("TIKTOK_API_BASE", "https://open.tiktokapis.com/v2")
+# Renova quando faltar menos que isto para o access token vencer.
+TIKTOK_RENOVAR_ANTES_S = _int("TIKTOK_RENOVAR_ANTES_S", 1800)
+
+# Privacidade pedida ao publicar. 'SELF_ONLY' é o padrão por dois motivos: é o
+# único valor que um app não revisado aceita, e o primeiro post de verdade
+# merece ser conferido antes de ficar público. Troque para
+# 'PUBLIC_TO_EVERYONE' quando a revisão sair.
+TIKTOK_PRIVACIDADE = _caminho("TIKTOK_PRIVACIDADE", "SELF_ONLY")
+# Declaração do humano de que a revisão saiu. Não é detecção — quem detecta é
+# o creator_info na hora de publicar; isto serve para o `--verificar` avisar
+# antes, em vez de o primeiro post revelar.
+TIKTOK_APP_AUDITADO = _bool("TIKTOK_APP_AUDITADO", False)
+
+# 'arquivo' envia os bytes (FILE_UPLOAD); 'url' manda a TikTok baixar de
+# CLIPS_BASE_URL (PULL_FROM_URL). O padrão é 'arquivo': ao contrário do
+# Instagram, a TikTok aceita upload direto, e o modo url ainda exige provar a
+# propriedade do domínio no painel de desenvolvedor.
+TIKTOK_MODO_UPLOAD = _caminho("TIKTOK_MODO_UPLOAD", "arquivo")
+# Tamanho de cada pedaço do upload, em MB. A API aceita de 5 a 64 MB por
+# chunk; um clip de 45 s cabe inteiro num só.
+TIKTOK_CHUNK_MB = _int("TIKTOK_CHUNK_MB", 64)
+
+# Limites do vídeo, conferidos AQUI antes de subir dezenas de MB para ouvir
+# não. A duração máxima de verdade vem do creator_info da conta (varia por
+# conta, e a API recusa o que passar dela); este é o teto de quem ainda não
+# perguntou.
+TIKTOK_DURACAO_MAXIMA_S = _int("TIKTOK_DURACAO_MAXIMA_S", 600)
+TIKTOK_TAMANHO_MAXIMO_MB = _int("TIKTOK_TAMANHO_MAXIMO_MB", 4096)
+TIKTOK_FORMATOS = _lista("TIKTOK_FORMATOS", [".mp4", ".webm", ".mov"])
+
+# Interação do post. O que o CRIADOR desligou nas preferências da conta manda
+# nestes valores: a API recusa o post que tenta ligar o que ele desligou, e o
+# creator_info é quem conta qual é o caso.
+TIKTOK_DESABILITAR_COMENTARIO = _bool("TIKTOK_DESABILITAR_COMENTARIO", False)
+TIKTOK_DESABILITAR_DUETO = _bool("TIKTOK_DESABILITAR_DUETO", False)
+TIKTOK_DESABILITAR_STITCH = _bool("TIKTOK_DESABILITAR_STITCH", False)
+
 # --- publish: metadata --------------------------------------------------------
 
 # Limites das plataformas, para o texto ser cortado aqui e não recusado lá.
 LIMITE_TITULO_YOUTUBE = _int("LIMITE_TITULO_YOUTUBE", 100)
 LIMITE_DESCRICAO_YOUTUBE = _int("LIMITE_DESCRICAO_YOUTUBE", 5000)
 LIMITE_CAPTION_INSTAGRAM = _int("LIMITE_CAPTION_INSTAGRAM", 2200)
+# TikTok: o teto da API é o mesmo 2200, mas o que aparece no feed são as duas
+# primeiras linhas — o resto fica atrás do "mais". Por isso o CORPO tem alvo
+# próprio, bem menor, e as hashtags entram depois dele. Cortar pelo teto da
+# API daria uma legenda tecnicamente válida que ninguém lê.
+LIMITE_CAPTION_TIKTOK = _int("LIMITE_CAPTION_TIKTOK", 2200)
+LIMITE_CORPO_TIKTOK = _int("LIMITE_CORPO_TIKTOK", 150)
 MAX_HASHTAGS = _int("MAX_HASHTAGS", 8)
 
 # Publicações processadas por execução.

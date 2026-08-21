@@ -208,5 +208,18 @@ def coletar(conn, agora=None, cliente_youtube=None, cliente_analytics=None,
             )
             contagem["instagram"] = contagem.get("instagram", 0) + 1
 
+    sem_coletor = sorted(set(por_plataforma) - {settings.PLATAFORMA_YOUTUBE,
+                                                settings.PLATAFORMA_INSTAGRAM})
+    if sem_coletor:
+        # O TikTok publica mas ainda não é medido: a métrica dele sai de outro
+        # escopo de OAuth (video.list), que este projeto não pede. Dizer isso
+        # em voz alta evita a conclusão errada de que aqueles posts não
+        # renderam — eles não foram perguntados.
+        log.info(
+            "Sem coletor de métricas para %s: %d post(s) ficam de fora da "
+            "recalibração.", ", ".join(sem_coletor),
+            sum(len(por_plataforma[p]) for p in sem_coletor),
+        )
+
     log.info("Medições gravadas: %s", contagem or "nenhuma")
     return contagem

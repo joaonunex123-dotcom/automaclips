@@ -1,9 +1,15 @@
 """Título, descrição, caption e hashtags de cada clip, pelo Claude.
 
-Uma chamada por clip produz o metadado das DUAS plataformas de uma vez. Duas
-chamadas separadas custariam o dobro e ainda dariam textos que não conversam
+Uma chamada por clip produz o metadado das TRÊS plataformas de uma vez. Uma
+chamada por plataforma custaria o triplo e ainda daria textos que não conversam
 entre si — e o material de entrada é o mesmo: o trecho, o gancho e de onde ele
 saiu.
+
+O que diverge por plataforma diverge no MESMO JSON, em campos separados: a
+caption do TikTok é mais curta que a do Instagram (no feed aparecem só as duas
+primeiras linhas), e a estratégia de hashtag também não é a mesma. Daí
+`hashtags_instagram` e `hashtags_tiktok` ao lado de `hashtags` — que continua
+sendo o conjunto geral, e é o que vale quando o modelo omite os específicos.
 
 O que entra no prompt é curto (a fala do trecho, não a transcrição inteira),
 então esta chamada é barata perto do `highlight_detect`. Vale o mesmo cuidado
@@ -37,8 +43,8 @@ class ErroMetadata(llm_client.ErroLLM):
 
 
 _INSTRUCOES = """\
-Você escreve o texto que acompanha um clip vertical curto (Shorts, Reels) ao \
-ser publicado.
+Você escreve o texto que acompanha um clip vertical curto (Shorts, Reels, \
+TikTok) ao ser publicado.
 
 Recebe: o trecho falado, o gancho escolhido para a abertura, e de qual vídeo e \
 canal ele saiu.
@@ -57,10 +63,20 @@ A caption do Instagram é mais solta e mais curta que a descrição, escrita par
 ser lida embaixo do vídeo, e pode terminar com uma pergunta se o assunto pedir \
 uma. Não repita o título palavra por palavra.
 
+A caption do TikTok é mais curta ainda: no feed aparecem só as duas primeiras \
+linhas, e o resto fica atrás do "mais". Escreva uma frase que se sustente \
+sozinha, sem depender do que viria depois dela.
+
 As hashtags são específicas do assunto, não genéricas de plataforma. \
 "#viral" e "#fyp" não dizem nada sobre o conteúdo e competem com milhões de \
 posts; o nome do tema, da pessoa ou do nicho competem com centenas. Devolva \
-sem o '#', uma palavra ou expressão por item."""
+sem o '#', uma palavra ou expressão por item.
+
+As listas por plataforma divergem porque a busca de cada uma divergiu: no \
+TikTok a hashtag funciona como termo de busca de nicho, e vale a expressão \
+que alguém digitaria para achar este assunto; no Instagram ela funciona mais \
+como etiqueta de tema. Quando não houver diferença real a fazer, repita as \
+mesmas."""
 
 
 ESQUEMA = {
@@ -69,7 +85,10 @@ ESQUEMA = {
         "titulo": {"type": "string"},
         "descricao": {"type": "string"},
         "caption": {"type": "string"},
+        "caption_tiktok": {"type": "string"},
         "hashtags": {"type": "array", "items": {"type": "string"}},
+        "hashtags_instagram": {"type": "array", "items": {"type": "string"}},
+        "hashtags_tiktok": {"type": "array", "items": {"type": "string"}},
     },
     "required": ["titulo", "descricao", "caption", "hashtags"],
     "additionalProperties": False,
@@ -92,15 +111,18 @@ def descricao_do_formato(esquema=None):
     return "Responda com um objeto JSON, e nada além dele:\n{\n" + ",\n".join(campos) + "\n}"
 
 
-def montar_sistema(max_hashtags=None, limite_titulo=None):
+def montar_sistema(max_hashtags=None, limite_titulo=None, limite_tiktok=None):
     """System prompt. Estável entre clips."""
     max_hashtags = settings.MAX_HASHTAGS if max_hashtags is None else max_hashtags
     limite_titulo = (settings.LIMITE_TITULO_YOUTUBE if limite_titulo is None
                      else limite_titulo)
+    limite_tiktok = (settings.LIMITE_CORPO_TIKTOK if limite_tiktok is None
+                     else limite_tiktok)
     return (
         f"{_INSTRUCOES}\n\n"
-        f"O título precisa caber em {limite_titulo:d} caracteres. "
-        f"Devolva até {max_hashtags:d} hashtags.\n\n"
+        f"O título precisa caber em {limite_titulo:d} caracteres, e a caption "
+        f"do TikTok em {limite_tiktok:d}. "
+        f"Devolva até {max_hashtags:d} hashtags por lista.\n\n"
         f"{descricao_do_formato()}"
     )
 
@@ -174,17 +196,34 @@ def _cortar(texto, limite):
 
 
 def normalizar(bruto, limites=None):
-    """Resposta do modelo -> metadado pronto para gravar, dentro dos limites."""
+    """Resposta do modelo -> metadado pronto para gravar, dentro dos limites.
+
+    Os campos por plataforma caem no campo geral quando o modelo não os
+    devolve, e isso não é tolerância a resposta ruim: é o que mantém a etapa
+    funcionando com o modelo de fallback, que costuma ser mais velho e mais
+    simples que o principal. Um clip sem `hashtags_tiktok` publica com as
+    hashtags gerais; um clip sem hashtag nenhuma não publica bem em lugar
+    nenhum.
+    """
     limites = limites or {}
     titulo = limites.get("titulo", settings.LIMITE_TITULO_YOUTUBE)
     descricao = limites.get("descricao", settings.LIMITE_DESCRICAO_YOUTUBE)
     caption = limites.get("caption", settings.LIMITE_CAPTION_INSTAGRAM)
+    corpo_tiktok = limites.get("caption_tiktok", settings.LIMITE_CORPO_TIKTOK)
 
+    hashtags = normalizar_hashtags(bruto.get("hashtags"))
     return {
         "titulo": _cortar(bruto.get("titulo"), titulo),
         "descricao": _cortar(bruto.get("descricao"), descricao),
         "caption": _cortar(bruto.get("caption"), caption),
-        "hashtags": normalizar_hashtags(bruto.get("hashtags")),
+        "caption_tiktok": _cortar(
+            bruto.get("caption_tiktok") or bruto.get("caption"), corpo_tiktok
+        ),
+        "hashtags": hashtags,
+        "hashtags_instagram": (normalizar_hashtags(bruto.get("hashtags_instagram"))
+                               or hashtags),
+        "hashtags_tiktok": (normalizar_hashtags(bruto.get("hashtags_tiktok"))
+                            or hashtags),
     }
 
 
@@ -258,9 +297,50 @@ def para_youtube(meta, url_fonte=""):
     }
 
 
+def _hashtags_de(meta, chave):
+    """As hashtags DAQUELA plataforma, caindo nas gerais quando não há.
+
+    A queda também cobre o metadado gerado antes de os campos por plataforma
+    existirem: a fila do modo sombra tem clips desses, e eles continuam
+    publicáveis.
+    """
+    return meta.get(chave) or meta.get("hashtags") or []
+
+
+# A hashtag guardada em `publicacoes` é a DAQUELA plataforma: é o que permite
+# à etapa 7 correlacionar desempenho com hashtag sem misturar as estratégias
+# de duas plataformas na mesma média.
+_CHAVE_DE_HASHTAG = {
+    settings.PLATAFORMA_INSTAGRAM: "hashtags_instagram",
+    settings.PLATAFORMA_TIKTOK: "hashtags_tiktok",
+}
+
+
+def hashtags_de(meta, plataforma):
+    """As hashtags que vão nesta plataforma; as gerais quando não há próprias."""
+    return _hashtags_de(meta, _CHAVE_DE_HASHTAG.get(plataforma, "hashtags"))
+
+
 def para_instagram(meta):
     """Caption com as hashtags no fim, dentro do limite da plataforma."""
     corpo = meta["caption"] or meta["titulo"]
-    marcas = " ".join(f"#{h}" for h in meta["hashtags"])
+    marcas = " ".join(f"#{h}" for h in _hashtags_de(meta, "hashtags_instagram"))
     texto = f"{corpo}\n\n{marcas}".strip() if marcas else corpo
     return {"caption": _cortar(texto, settings.LIMITE_CAPTION_INSTAGRAM)}
+
+
+def para_tiktok(meta):
+    """Caption do TikTok: corpo curto e as hashtags do nicho depois dele.
+
+    O corpo sai do `caption_tiktok` e é curto de propósito — a legenda inteira
+    cabe em 2200 caracteres, mas o que o leitor vê antes de tocar em "mais"
+    são duas linhas. Cortar só pelo teto da API daria um texto válido que
+    ninguém lê.
+    """
+    corpo = _cortar(
+        meta.get("caption_tiktok") or meta.get("caption") or meta["titulo"],
+        settings.LIMITE_CORPO_TIKTOK,
+    )
+    marcas = " ".join(f"#{h}" for h in _hashtags_de(meta, "hashtags_tiktok"))
+    texto = f"{corpo}\n\n{marcas}".strip() if marcas else corpo
+    return {"caption": _cortar(texto, settings.LIMITE_CAPTION_TIKTOK)}

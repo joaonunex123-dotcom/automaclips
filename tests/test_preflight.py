@@ -125,3 +125,84 @@ def test_relatorio_separa_bloqueio_de_aviso(conn, monkeypatch, pronto):
     texto = preflight.formatar(preflight.verificar(conn))
     assert "IMPEDE A PUBLICAÇÃO" in texto
     assert "avisos" in texto
+
+
+# --- TikTok -------------------------------------------------------------------
+
+@pytest.fixture
+def tiktok_pronto(monkeypatch, pronto):
+    """TikTok com tudo preenchido e o app já revisado."""
+    monkeypatch.setattr(settings, "TIKTOK_CLIENT_KEY", "chave")
+    monkeypatch.setattr(settings, "TIKTOK_CLIENT_SECRET", "segredo")
+    monkeypatch.setattr(settings, "TIKTOK_ACCESS_TOKEN", "tok")
+    monkeypatch.setattr(settings, "TIKTOK_REFRESH_TOKEN", "refresh")
+    monkeypatch.setattr(settings, "TIKTOK_MODO_UPLOAD", "arquivo")
+    monkeypatch.setattr(settings, "TIKTOK_APP_AUDITADO", True)
+    monkeypatch.setattr(settings, "TIKTOK_PRIVACIDADE", "PUBLIC_TO_EVERYONE")
+    return pronto
+
+
+def test_tiktok_configurado_nao_tem_problema(conn, tiktok_pronto):
+    assert preflight.verificar(conn, plataformas=["tiktok"]) == []
+
+
+def test_sem_credenciais_bloqueia_o_tiktok(conn, monkeypatch, tiktok_pronto):
+    monkeypatch.setattr(settings, "TIKTOK_CLIENT_KEY", "")
+    problemas = preflight.verificar(conn, plataformas=["tiktok"])
+    assert "tiktok" in preflight.plataformas_bloqueadas(problemas)
+
+
+def test_sem_access_token_bloqueia_o_tiktok(conn, monkeypatch, tiktok_pronto):
+    monkeypatch.setattr(settings, "TIKTOK_ACCESS_TOKEN", "")
+    problemas = preflight.verificar(conn, plataformas=["tiktok"])
+    assert "tiktok" in preflight.plataformas_bloqueadas(problemas)
+
+
+def test_token_do_banco_conta_como_configurado(conn, monkeypatch, tiktok_pronto):
+    monkeypatch.setattr(settings, "TIKTOK_ACCESS_TOKEN", "")
+    monkeypatch.setattr(settings, "TIKTOK_REFRESH_TOKEN", "")
+    repositorio.salvar_token(conn, "tiktok", "do-banco", "2026-08-22T00:00:00")
+    repositorio.salvar_token(conn, "tiktok_refresh", "refresh-do-banco")
+    assert preflight.verificar(conn, plataformas=["tiktok"]) == []
+
+
+def test_sem_refresh_e_aviso_nao_bloqueio(conn, monkeypatch, tiktok_pronto):
+    # O post de hoje sai; o de amanhã é que não, porque o access token do
+    # TikTok vale ~24 h.
+    monkeypatch.setattr(settings, "TIKTOK_REFRESH_TOKEN", "")
+    problemas = preflight.verificar(conn, plataformas=["tiktok"])
+    assert [p["nivel"] for p in problemas] == [preflight.AVISO]
+    assert "24 h" in problemas[0]["mensagem"]
+
+
+def test_modo_url_sem_base_url_bloqueia(conn, monkeypatch, tiktok_pronto):
+    monkeypatch.setattr(settings, "TIKTOK_MODO_UPLOAD", "url")
+    monkeypatch.setattr(settings, "CLIPS_BASE_URL", "")
+    problemas = preflight.verificar(conn, plataformas=["tiktok"])
+    assert "tiktok" in preflight.plataformas_bloqueadas(problemas)
+    assert "TIKTOK_MODO_UPLOAD=arquivo" in problemas[0]["como_resolver"]
+
+
+def test_app_nao_revisado_avisa_do_post_privado(conn, monkeypatch,
+                                                tiktok_pronto):
+    # É o aviso que evita a conclusão errada quando o primeiro post sair
+    # privado: a limitação é da plataforma, não da integração.
+    monkeypatch.setattr(settings, "TIKTOK_APP_AUDITADO", False)
+    problemas = preflight.verificar(conn, plataformas=["tiktok"])
+    assert [p["nivel"] for p in problemas] == [preflight.AVISO]
+    assert "SELF_ONLY" in problemas[0]["mensagem"]
+    assert not preflight.plataformas_bloqueadas(problemas)
+
+
+def test_privacidade_privada_com_app_revisado_ainda_avisa(conn, monkeypatch,
+                                                          tiktok_pronto):
+    monkeypatch.setattr(settings, "TIKTOK_PRIVACIDADE", "SELF_ONLY")
+    problemas = preflight.verificar(conn, plataformas=["tiktok"])
+    assert [p["nivel"] for p in problemas] == [preflight.AVISO]
+    assert "só você vê" in problemas[0]["mensagem"]
+
+
+def test_tiktok_fora_das_plataformas_nao_e_verificado(conn, monkeypatch,
+                                                      pronto):
+    monkeypatch.setattr(settings, "TIKTOK_ACCESS_TOKEN", "")
+    assert preflight.verificar(conn, plataformas=["youtube", "instagram"]) == []

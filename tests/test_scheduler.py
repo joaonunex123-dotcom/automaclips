@@ -173,3 +173,60 @@ def test_formato_e_comparavel_com_o_do_sqlite(conn):
     # SQL; formato diferente faria a comparação virar ordenação de texto errada.
     do_sqlite = conn.execute("SELECT datetime('now', 'localtime')").fetchone()[0]
     assert scheduler.analisar(do_sqlite)
+
+
+# --- teto diário por plataforma -----------------------------------------------
+
+def test_teto_diario_empurra_o_excedente_para_amanha(conn):
+    slots = scheduler.proximos_slots(
+        conn, "tiktok", 4, agora=AGORA,
+        horarios=["10:00", "12:00", "18:00", "21:00"], intervalo_min=0,
+        por_dia=2,
+    )
+    dias = [s[:10] for s in slots]
+    assert dias == ["2026-08-11", "2026-08-11", "2026-08-12", "2026-08-12"]
+
+
+def test_cada_plataforma_tem_o_proprio_teto(conn, monkeypatch):
+    # A quota do YouTube não tem nada a ver com o limite do TikTok; um número
+    # global faria a mais restrita ditar o ritmo da outra.
+    monkeypatch.setattr(settings, "POSTS_POR_DIA", 3)
+    monkeypatch.setattr(settings, "POSTS_POR_DIA_PLATAFORMA", {"tiktok": 1})
+
+    do_tiktok = scheduler.proximos_slots(conn, "tiktok", 3, agora=AGORA,
+                                         horarios=HORARIOS, intervalo_min=0)
+    do_youtube = scheduler.proximos_slots(conn, "youtube", 3, agora=AGORA,
+                                          horarios=HORARIOS, intervalo_min=0)
+    assert [s[:10] for s in do_tiktok] == ["2026-08-11", "2026-08-12",
+                                           "2026-08-13"]
+    assert [s[:10] for s in do_youtube] == ["2026-08-11"] * 3
+
+
+def test_agendamento_ja_no_banco_ocupa_a_vaga_do_dia(conn, clip_publicavel):
+    clip_id = clip_publicavel()
+    repositorio.agendar_publicacao(conn, clip_id, "tiktok",
+                                   "2026-08-11 18:00:00")
+    slots = scheduler.proximos_slots(conn, "tiktok", 1, agora=AGORA,
+                                     horarios=HORARIOS, intervalo_min=0,
+                                     por_dia=1)
+    assert slots == ["2026-08-12 12:00:00"]
+
+
+def test_post_que_ja_saiu_hoje_ocupa_a_vaga_do_dia(conn, clip_publicavel):
+    # O contador do dia olha o dia inteiro, não só o que ainda está por vir:
+    # um post das 8h já gastou uma das vagas de hoje.
+    clip_id = clip_publicavel()
+    repositorio.agendar_publicacao(conn, clip_id, "tiktok",
+                                   "2026-08-11 08:00:00")
+    slots = scheduler.proximos_slots(conn, "tiktok", 1, agora=AGORA,
+                                     horarios=HORARIOS, intervalo_min=0,
+                                     por_dia=1)
+    assert slots == ["2026-08-12 12:00:00"]
+
+
+def test_teto_zero_nao_limita(conn):
+    # 0 desliga o teto, como todo número de teto neste projeto.
+    slots = scheduler.proximos_slots(conn, "tiktok", 3, agora=AGORA,
+                                     horarios=HORARIOS, intervalo_min=0,
+                                     por_dia=0)
+    assert [s[:10] for s in slots] == ["2026-08-11"] * 3

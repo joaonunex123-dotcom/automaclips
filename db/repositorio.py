@@ -483,7 +483,8 @@ def horarios_agendados(conn, plataforma, desde=None):
 
 def publicacoes_vencidas(conn, plataforma=None, agora=None, limite=None):
     """Agendamentos cuja hora chegou, do mais antigo para o mais novo."""
-    sql = "SELECT p.*, r.caminho AS render_path, f.video_id" \
+    sql = "SELECT p.*, r.caminho AS render_path," \
+          "       r.duracao_s AS render_duracao_s, f.video_id" \
           " FROM publicacoes p" \
           " JOIN clips c ON c.id = p.clip_id" \
           " LEFT JOIN renders r ON r.clip_id = p.clip_id" \

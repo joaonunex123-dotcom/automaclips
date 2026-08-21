@@ -269,3 +269,84 @@ def test_instagram_respeita_o_limite():
     meta = metadata.normalizar({**RESPOSTA, "caption": "x" * 3000})
     saida = metadata.para_instagram(meta)
     assert len(saida["caption"]) <= settings.LIMITE_CAPTION_INSTAGRAM
+
+
+# --- por plataforma: TikTok ---------------------------------------------------
+
+POR_PLATAFORMA = {
+    **RESPOSTA,
+    "caption_tiktok": "ele não esperava essa resposta",
+    "hashtags_instagram": ["bastidores"],
+    "hashtags_tiktok": ["cortesdepodcast", "entrevista"],
+}
+
+
+def test_prompt_cobre_as_tres_plataformas():
+    sistema = metadata.montar_sistema()
+    for plataforma in ("YouTube", "Instagram", "TikTok"):
+        assert plataforma in sistema
+
+
+def test_hashtags_por_plataforma_ficam_separadas():
+    meta = metadata.normalizar(POR_PLATAFORMA)
+    assert meta["hashtags_tiktok"] == ["cortesdepodcast", "entrevista"]
+    assert meta["hashtags_instagram"] == ["bastidores"]
+    assert meta["hashtags"] == ["podcast", "entrevista", "bastidores"]
+
+
+def test_sem_campo_por_plataforma_cai_nas_gerais():
+    # O modelo de fallback é mais velho e mais simples, e devolve só
+    # `hashtags`. Um clip sem hashtag do TikTok publica com as gerais; um
+    # clip sem hashtag nenhuma não publica bem em lugar nenhum.
+    meta = metadata.normalizar(RESPOSTA)
+    assert meta["hashtags_tiktok"] == meta["hashtags"]
+    assert meta["hashtags_instagram"] == meta["hashtags"]
+
+
+def test_caption_do_tiktok_e_cortada_bem_antes_do_teto_da_api():
+    # 2200 caracteres cabem na API, mas o leitor vê duas linhas antes do
+    # "mais". Cortar só pelo teto daria um texto válido que ninguém lê.
+    meta = metadata.normalizar({**RESPOSTA, "caption_tiktok": "palavra " * 200})
+    assert len(meta["caption_tiktok"]) <= settings.LIMITE_CORPO_TIKTOK
+    assert len(meta["caption_tiktok"]) < settings.LIMITE_CAPTION_TIKTOK
+
+
+def test_tiktok_usa_a_propria_caption_e_as_proprias_hashtags():
+    saida = metadata.para_tiktok(metadata.normalizar(POR_PLATAFORMA))
+    assert saida["caption"].startswith("ele não esperava")
+    assert "#cortesdepodcast" in saida["caption"]
+    assert "#bastidores" not in saida["caption"]
+
+
+def test_tiktok_cai_na_caption_do_instagram_quando_falta_a_sua():
+    saida = metadata.para_tiktok(metadata.normalizar(RESPOSTA))
+    assert saida["caption"].startswith("não dava pra prever")
+
+
+def test_tiktok_respeita_o_teto_da_api():
+    meta = metadata.normalizar(POR_PLATAFORMA)
+    meta["hashtags_tiktok"] = ["x" * 400] * 8
+    assert len(metadata.para_tiktok(meta)["caption"]) <= settings.LIMITE_CAPTION_TIKTOK
+
+
+def test_instagram_nao_leva_as_hashtags_do_tiktok():
+    saida = metadata.para_instagram(metadata.normalizar(POR_PLATAFORMA))
+    assert saida["caption"].rstrip().endswith("#bastidores")
+    assert "#cortesdepodcast" not in saida["caption"]
+
+
+def test_hashtags_de_escolhe_pela_plataforma():
+    meta = metadata.normalizar(POR_PLATAFORMA)
+    assert metadata.hashtags_de(meta, settings.PLATAFORMA_TIKTOK) == [
+        "cortesdepodcast", "entrevista"]
+    assert metadata.hashtags_de(meta, settings.PLATAFORMA_INSTAGRAM) == ["bastidores"]
+    # O YouTube fica com o conjunto geral: lá a hashtag entra na descrição e
+    # como tag, e não é a mesma disputa de busca.
+    assert metadata.hashtags_de(meta, settings.PLATAFORMA_YOUTUBE) == meta["hashtags"]
+
+
+def test_formato_do_json_declara_os_campos_por_plataforma():
+    formato = metadata.descricao_do_formato()
+    assert "hashtags_tiktok" in formato
+    assert "hashtags_instagram" in formato
+    assert "caption_tiktok" in formato

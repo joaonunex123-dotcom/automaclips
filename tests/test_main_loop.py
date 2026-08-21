@@ -217,3 +217,19 @@ def test_horario_sem_minutos_funciona(conn, monkeypatch):
     job = [j for j in main_loop.montar_agenda(AgendadorFalso(), conn).jobs
            if j["id"] == "analytics"][0]
     assert (job["hour"], job["minute"]) == (6, 0)
+
+
+def test_verificar_cobre_o_tiktok(conn, monkeypatch, tmp_path, capsys):
+    # O --verificar é o que se roda ANTES de ligar AUTO_PUBLISH; uma
+    # plataforma que ele não confere é uma que só reclama no horário do post.
+    monkeypatch.setattr(settings, "PLATAFORMAS", ["tiktok"])
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "sk-or-xxx")
+    monkeypatch.setattr(settings, "ARQUIVO_PARAR_PUBLICACAO",
+                        str(tmp_path / "PARAR"))
+    monkeypatch.setattr(settings, "TIKTOK_CLIENT_KEY", "")
+    monkeypatch.setattr(settings, "TIKTOK_ACCESS_TOKEN", "")
+
+    assert main_loop.main(["--verificar"]) == 1
+    saida = capsys.readouterr().out
+    assert "tiktok" in saida
+    assert "TIKTOK_CLIENT_KEY" in saida

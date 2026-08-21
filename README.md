@@ -5,8 +5,10 @@ monitorados, recorta os melhores trechos, edita com legenda e SFX, publica e
 recalibra a seleção com base no que performou.
 
 Estado: **as 7 etapas entregues**, rodando sozinho no relógio e recalibrando
-a seleção com o que performou. A publicação real está **construída mas
-desligada**: `AUTO_PUBLISH=false` é o padrão, e virar essa chave é decisão sua.
+a seleção com o que performou. Publica em YouTube Shorts, Instagram Reels e
+TikTok — o mesmo arquivo nos três, com o texto de cada um. A publicação real
+está **construída mas desligada**: `AUTO_PUBLISH=false` é o padrão, e virar
+essa chave é decisão sua.
 
 ## Instalação
 
@@ -364,7 +366,7 @@ sozinha não segura:
 | freio | o que cobre |
 | --- | --- |
 | `PARAR_PUBLICACAO` (arquivo na raiz) | emergência: bloqueia tudo na hora, sem editar `.env` nem parar processo |
-| `MAX_POSTS_DIA_ABSOLUTO` | bug de agenda: o scheduler confia na própria agenda, este número não |
+| `MAX_POSTS_DIA_ABSOLUTO` | bug de agenda: o scheduler confia na própria agenda, este número não (com override por plataforma em `MAX_POSTS_DIA_ABSOLUTO_PLATAFORMA`) |
 | `AQUECIMENTO_POSTS_DIA` | os primeiros dias no volume cheio, antes de ver como os clips performam |
 
 Os três **adiam**, não descartam: o post continua `agendado` e sai quando o
@@ -402,6 +404,46 @@ renovado pelo próprio programa: um token que morre num domingo derrubaria a
 fila até alguém notar. Por isso o valor vigente vive na tabela `tokens`, não
 no `.env` — segredo que o programa reescreve não cabe em arquivo que o humano
 edita.
+
+**TikTok.** Content Posting API — não é a API por trás do app de celular:
+exige um app registrado em developers.tiktok.com, com os escopos
+`video.publish` e `user.info.basic`. Três diferenças em relação às outras
+duas:
+
+* **App não revisado publica PRIVADO.** Enquanto a TikTok não aprovar a
+  revisão do app, a única privacidade que a API aceita é `SELF_ONLY`: o vídeo
+  sobe, fica na conta e só o dono vê. **Isso não é bug da integração** — é
+  como a plataforma trata app em sandbox, e a revisão leva dias ou semanas.
+  Quando for o caso, o código detecta pelo `creator_info`, rebaixa o pedido em
+  vez de falhar (falhar perderia o clip por uma limitação que não se resolve
+  sozinha) e avisa alto no log: `TikTok publicando em modo restrito`. O
+  `--verificar` avisa antes, enquanto `TIKTOK_APP_AUDITADO=false`.
+* **O access token dura ~24 h**, não 60 dias. Sem `TIKTOK_REFRESH_TOKEN` a
+  fila para sozinha amanhã. Os dois valores vigentes passam a viver na tabela
+  `tokens` depois da primeira renovação, pelo mesmo motivo do Instagram.
+* **Aceita upload de arquivo**, ao contrário do Instagram. O padrão
+  (`TIKTOK_MODO_UPLOAD=arquivo`) manda os bytes em pedaços e não depende de
+  hospedagem pública; `url` reaproveita a `CLIPS_BASE_URL`, mas exige provar a
+  propriedade do domínio no painel de desenvolvedor.
+
+O TikTok chega **desligado**: `PUBLICAR_TIKTOK=true` (ou `tiktok` na lista de
+`PLATAFORMAS`) é o que o liga. O clip publicado é o MESMO arquivo do Instagram
+e do Shorts — 9:16, mp4, legenda queimada —, sem processamento extra. O que
+diverge é só o texto: a caption do TikTok é mais curta (no feed aparecem duas
+linhas) e as hashtags são outras, geradas na mesma chamada de LLM, em
+`hashtags_tiktok`.
+
+Ainda **não medido pela etapa 7**: as métricas do TikTok saem de outro escopo
+de OAuth (`video.list`), que este projeto não pede. Os posts saem, mas ficam
+de fora da recalibração — o `coletar` diz isso no log em vez de deixar
+parecer que eles não renderam.
+
+**Ritmo por plataforma.** `POSTS_POR_DIA` é o número geral e
+`POSTS_POR_DIA_PLATAFORMA` (`tiktok=4,instagram=2`) manda em quem estiver
+listado. Cada plataforma tem quota e rate limit próprios — a do YouTube é dura
+e diária, a do TikTok conta publicações por token, a do Instagram conta
+chamadas por hora —, e um número global obrigaria a mais restrita a ditar o
+ritmo das outras.
 
 **Horários.** O spec pede que venham do histórico de engajamento, com
 horários padrão como fallback. Hoje o fallback é o caminho real, porque não
@@ -443,6 +485,7 @@ publish/scheduler.py         atribui os horários
 publish/quota.py             quota diária do YouTube (dia do Pacífico)
 publish/youtube.py           upload via OAuth
 publish/instagram.py         Reels e renovação do token
+publish/tiktok.py            Content Posting API (token de 24 h, upload em pedaços)
 publish/publicar.py          agenda, publica ou simula
 publish/preflight.py         confere se a publicação real pode ser ligada
 

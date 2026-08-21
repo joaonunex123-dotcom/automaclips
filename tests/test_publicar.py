@@ -309,3 +309,119 @@ def test_resumo_mostra_agenda_e_quota(conn, clip_publicavel, agendar,
     assert "agendados em youtube" in texto
     assert "quota YouTube" in texto
     assert "O que ninguém contou" in texto
+
+
+# --- TikTok como terceiro destino ---------------------------------------------
+
+def test_agenda_nas_tres_plataformas(conn, clip_publicavel, agendar):
+    clip_publicavel()
+    assert agendar(plataformas=["youtube", "instagram", "tiktok"]) == {
+        "youtube": 1, "instagram": 1, "tiktok": 1,
+    }
+
+
+def test_metadado_continua_sendo_um_por_clip_com_tres_plataformas(
+        conn, clip_publicavel, meta_falso):
+    clip_publicavel()
+    chamadas = []
+
+    def gerar(clip, **kwargs):
+        chamadas.append(clip["id"])
+        return meta_falso()(clip)
+
+    publicar.agendar_pendentes(conn, ["youtube", "instagram", "tiktok"],
+                               agora=AGORA, gerar=gerar)
+    assert len(chamadas) == 1
+
+
+def test_tiktok_grava_a_caption_e_as_hashtags_do_tiktok(conn, clip_publicavel,
+                                                        meta_falso):
+    clip_publicavel()
+    publicar.agendar_pendentes(
+        conn, ["tiktok"], agora=AGORA,
+        gerar=meta_falso(caption_tiktok="curta e seca",
+                         hashtags_tiktok=["cortes"]),
+    )
+    linha = conn.execute("SELECT * FROM publicacoes").fetchone()
+    assert linha["descricao"].startswith("curta e seca")
+    assert json.loads(linha["hashtags"]) == ["cortes"]
+
+
+def test_cada_plataforma_recebe_o_proprio_texto(conn, clip_publicavel,
+                                                meta_falso):
+    # O `else` que significava "Instagram" publicaria no TikTok a caption do
+    # Instagram, com o comprimento do Instagram, sem ninguém notar.
+    clip_publicavel()
+    publicar.agendar_pendentes(
+        conn, ["instagram", "tiktok"], agora=AGORA,
+        gerar=meta_falso(caption="a do instagram",
+                         caption_tiktok="a do tiktok"),
+    )
+    textos = {l["plataforma"]: l["descricao"]
+              for l in conn.execute("SELECT * FROM publicacoes")}
+    assert textos["instagram"].startswith("a do instagram")
+    assert textos["tiktok"].startswith("a do tiktok")
+
+
+def test_plataforma_sem_formato_proprio_avisa(caplog):
+    meta = {"titulo": "t", "descricao": "d", "caption": "c", "hashtags": []}
+    titulo, descricao = publicar.texto_do_post("twitch", meta)
+    assert (titulo, descricao) == ("t", "c")
+    assert "sem formato de texto próprio" in caplog.text
+
+
+def test_tiktok_tem_enviador_registrado():
+    # Sem isto o post vira 'falha' com "plataforma sem enviador" no horário
+    # agendado, e o clip é queimado.
+    assert settings.PLATAFORMA_TIKTOK in publicar.ENVIADORES
+
+
+def test_enviador_do_tiktok_leva_a_duracao_do_render(conn, clip_publicavel,
+                                                     agendar, monkeypatch):
+    # A duração vai junto porque o TikTok recusa clip mais longo que o máximo
+    # da conta, e conferir isso antes economiza o upload inteiro.
+    recebido = {}
+
+    def publicar_falso(conn_, caminho, caption, duracao_s=None, **kwargs):
+        recebido.update(caminho=caminho, caption=caption, duracao_s=duracao_s)
+        return "pub-1", ""
+
+    monkeypatch.setattr(publicar.tiktok_mod, "publicar", publicar_falso)
+    clip_publicavel()
+    agendar(plataformas=["tiktok"])
+    contagem = publicar.processar_vencidas(conn, agora=DEPOIS,
+                                           auto_publish=True)
+    assert contagem == {"publicado": 1}
+    assert recebido["duracao_s"] == 45.0
+    assert recebido["caption"]
+
+
+def test_modo_sombra_tambem_vale_para_o_tiktok(conn, clip_publicavel, agendar,
+                                               monkeypatch):
+    def explode(*_a, **_k):
+        raise AssertionError("nada pode ser publicado com AUTO_PUBLISH=false")
+
+    monkeypatch.setattr(publicar.tiktok_mod, "publicar", explode)
+    clip_publicavel()
+    agendar(plataformas=["tiktok"])
+    contagem = publicar.processar_vencidas(conn, agora=DEPOIS,
+                                           auto_publish=False)
+    assert contagem == {"simulado": 1}
+
+
+def test_teto_diario_do_freio_e_por_plataforma(conn, clip_publicavel, agendar,
+                                               monkeypatch):
+    monkeypatch.setattr(settings, "MAX_POSTS_DIA_ABSOLUTO", 6)
+    monkeypatch.setattr(settings, "MAX_POSTS_DIA_ABSOLUTO_PLATAFORMA",
+                        {"tiktok": 1})
+    monkeypatch.setattr(settings, "AQUECIMENTO_POSTS_DIA", 0)
+    clip_publicavel()
+    agendar(plataformas=["tiktok", "youtube"])
+    conn.execute(
+        "UPDATE publicacoes SET status = 'publicado',"
+        " publicado_em = '2026-08-11 08:00:00' WHERE plataforma = 'tiktok'"
+    )
+    conn.commit()
+
+    assert "tiktok" in publicar.freio_ativo(conn, "tiktok", DEPOIS)
+    assert publicar.freio_ativo(conn, "youtube", DEPOIS) is None

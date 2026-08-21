@@ -33,6 +33,7 @@ from publish import metadata as metadata_mod
 from publish import preflight
 from publish import quota
 from publish import scheduler
+from publish import tiktok as tiktok_mod
 from publish import youtube as youtube_mod
 
 log = logging.getLogger(__name__)
@@ -78,6 +79,29 @@ def _fala(linha, carregar_transcricao):
     return metadata_mod.fala_do_trecho(
         transcricao, float(linha["inicio_s"]), float(linha["fim_s"])
     )
+
+
+def texto_do_post(plataforma, meta, url_fonte=""):
+    """(título, descrição) no formato daquela plataforma.
+
+    Uma tabela e não um if no meio do laço porque a terceira plataforma
+    mostrou o que o `else` queria dizer: "Instagram". Um TikTok caindo nele
+    publicaria a caption do Instagram, com o comprimento do Instagram, sem
+    ninguém notar — e o texto só é conferido depois de publicado.
+    """
+    if plataforma == settings.PLATAFORMA_YOUTUBE:
+        texto = metadata_mod.para_youtube(meta, url_fonte)
+        return texto["titulo"], texto["descricao"]
+    if plataforma == settings.PLATAFORMA_INSTAGRAM:
+        return meta["titulo"], metadata_mod.para_instagram(meta)["caption"]
+    if plataforma == settings.PLATAFORMA_TIKTOK:
+        return meta["titulo"], metadata_mod.para_tiktok(meta)["caption"]
+
+    # Plataforma que ninguém ensinou a formatar: o texto genérico ainda
+    # publica, e o aviso é o que impede isso de virar padrão silencioso.
+    log.warning("Plataforma %s sem formato de texto próprio; usando o "
+                "genérico.", plataforma)
+    return meta["titulo"], meta.get("caption") or meta["titulo"]
 
 
 def agendar_pendentes(conn, plataformas=None, limite=None, agora=None,
@@ -127,16 +151,12 @@ def agendar_pendentes(conn, plataformas=None, limite=None, agora=None,
                 )
                 continue
 
-            if plataforma == settings.PLATAFORMA_YOUTUBE:
-                texto = metadata_mod.para_youtube(meta, linha["url_fonte"])
-                titulo, descricao = texto["titulo"], texto["descricao"]
-            else:
-                titulo = meta["titulo"]
-                descricao = metadata_mod.para_instagram(meta)["caption"]
-
+            titulo, descricao = texto_do_post(plataforma, meta,
+                                              linha["url_fonte"])
             repositorio.agendar_publicacao(
                 conn, linha["id"], plataforma, disponiveis[indice],
-                titulo=titulo, descricao=descricao, hashtags=meta["hashtags"],
+                titulo=titulo, descricao=descricao,
+                hashtags=metadata_mod.hashtags_de(meta, plataforma),
             )
             contagem[plataforma] = contagem.get(plataforma, 0) + 1
             log.info("Clip %s agendado em %s para %s.",
@@ -169,9 +189,19 @@ def _enviar_instagram(conn, linha, agora=None):
     )
 
 
+def _enviar_tiktok(conn, linha, agora=None):
+    # A duração vai junto porque o TikTok recusa clip mais longo que o máximo
+    # DA CONTA, e conferir isso antes economiza o upload inteiro.
+    return tiktok_mod.publicar(
+        conn, linha["render_path"], linha["descricao"],
+        duracao_s=linha["render_duracao_s"], agora=agora,
+    )
+
+
 ENVIADORES = {
     settings.PLATAFORMA_YOUTUBE: _enviar_youtube,
     settings.PLATAFORMA_INSTAGRAM: _enviar_instagram,
+    settings.PLATAFORMA_TIKTOK: _enviar_tiktok,
 }
 
 
@@ -215,7 +245,7 @@ def freio_ativo(conn, plataforma, agora):
     dia = agora.date().isoformat()
     publicados = repositorio.posts_publicados_no_dia(conn, plataforma, dia)
 
-    teto = settings.MAX_POSTS_DIA_ABSOLUTO
+    teto = settings.max_posts_dia(plataforma)
     if teto and publicados >= teto:
         return f"teto de {teto} posts/dia em {plataforma} ja atingido"
 
