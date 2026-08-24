@@ -301,8 +301,17 @@ antes desta etapa existir.
 
 **Desempenho é views por hora**, não views cruas, pelo mesmo motivo do score de
 sourcing: o acumulado premiaria o post mais antigo. E é normalizado pela
-mediana da **própria plataforma** — YouTube e Instagram têm escalas tão
-diferentes que misturá-los faria uma plataforma vencer sempre.
+mediana da **própria plataforma** — YouTube, Instagram e TikTok têm escalas
+tão diferentes que misturá-los faria uma plataforma vencer sempre. É por isso
+que a chegada do TikTok não exigiu nada da recalibração: cada post já era
+comparado contra os da própria casa.
+
+Cada plataforma é medida pela credencial que ela mesma pede: o YouTube pela
+chave de API (1 unidade por até 50 vídeos, contra as 1600 de um upload), o
+Instagram pelo token de longa duração, o TikTok pelo access token da
+publicação com o escopo `video.list` — em lotes de 20 ids por chamada. Uma
+plataforma fora do ar não derruba a medição das outras: o erro fica no log e
+a recalibração roda sobre o que já foi medido.
 
 Canal fraco é julgado pela **mediana**, não pela média: um único clip que
 viralizou levantaria a média de um canal que não rende, e é justamente o canal
@@ -407,8 +416,8 @@ edita.
 
 **TikTok.** Content Posting API — não é a API por trás do app de celular:
 exige um app registrado em developers.tiktok.com, com os escopos
-`video.publish` e `user.info.basic`. Três diferenças em relação às outras
-duas:
+`video.publish` e `user.info.basic` para publicar, mais `video.list` para a
+etapa 7 medir. Três diferenças em relação às outras duas:
 
 * **App não revisado publica PRIVADO.** Enquanto a TikTok não aprovar a
   revisão do app, a única privacidade que a API aceita é `SELF_ONLY`: o vídeo
@@ -433,10 +442,11 @@ diverge é só o texto: a caption do TikTok é mais curta (no feed aparecem duas
 linhas) e as hashtags são outras, geradas na mesma chamada de LLM, em
 `hashtags_tiktok`.
 
-Ainda **não medido pela etapa 7**: as métricas do TikTok saem de outro escopo
-de OAuth (`video.list`), que este projeto não pede. Os posts saem, mas ficam
-de fora da recalibração — o `coletar` diz isso no log em vez de deixar
-parecer que eles não renderam.
+**Medido pela etapa 7** desde que o app tenha o escopo `video.list` na
+autorização — o mesmo access token da publicação, outro escopo e outro
+endpoint. Post que saiu privado (app não revisado) é a exceção: sem id
+público não há o que consultar, e ele é pulado com aviso no log, não com
+erro.
 
 **Ritmo por plataforma.** `POSTS_POR_DIA` é o número geral e
 `POSTS_POR_DIA_PLATAFORMA` (`tiktok=4,instagram=2`) manda em quem estiver

@@ -37,6 +37,11 @@ YouTube ou no Instagram:
    quando não há outro, e a URL fica vazia em vez de apontar para uma página
    que não abre.
 
+A etapa 7 usa o MESMO access token daqui para ler as métricas do que foi
+publicado, mas por outro escopo (``video.list``) e por outro endpoint — ver
+`analytics/coletar.py`. Autorizar o app só para publicar deixa a publicação
+funcionando e a medição não.
+
 O refresh token mora na tabela `tokens` sob um SERVIÇO próprio
 (``tiktok_refresh``) porque a tabela tem uma coluna de token só, e o schema
 deste projeto é aditivo — nada de ALTER TABLE para acomodar um segundo valor.
@@ -515,6 +520,20 @@ def identificar(publish_id, dados, criador):
     if not usuario:
         return post_id, ""
     return post_id, f"https://www.tiktok.com/@{usuario}/video/{post_id}"
+
+
+def id_publico(id_externo):
+    """Se o identificador gravado dá para consultar métrica depois.
+
+    `identificar` grava o id do vídeo quando o post é público, e o publish_id
+    quando não é — e o publish_id não serve para consultar nada além do status
+    da própria publicação. Os dois se distinguem pela forma: id de vídeo é só
+    dígito, publish_id carrega prefixo e pontuação ('v_pub_file~v2-1.123').
+
+    Vale como a pergunta "este post é público?": um post SELF_ONLY nunca ganha
+    o primeiro.
+    """
+    return str(id_externo or "").isdigit()
 
 
 def publicar(conn, caminho_render, caption, duracao_s=None, http=None,

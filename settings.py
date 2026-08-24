@@ -600,7 +600,8 @@ CLIPS_BASE_URL = _caminho("CLIPS_BASE_URL", "")
 #
 # Content Posting API (open.tiktokapis.com/v2). Não é a API por trás do app de
 # celular: exige um app registrado em developers.tiktok.com com os escopos
-# `video.publish` e `user.info.basic`, e a conta do canal autorizada nele.
+# `video.publish` e `user.info.basic`, e a conta do canal autorizada nele. A
+# coleta de métricas da etapa 7 pede um terceiro, `video.list`.
 #
 # LIMITAÇÃO DA PLATAFORMA, e não defeito daqui: enquanto o app não passar pela
 # revisão da TikTok, TODO post sai como SELF_ONLY — visível só para a própria

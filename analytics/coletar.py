@@ -5,7 +5,7 @@ não estado: um clip medido uma vez só não diz se cresceu ou estagnou, e é
 exatamente essa diferença que separa um clip que pegou de um que teve um pico
 de notificação e morreu.
 
-Duas escolhas que economizam credencial e quota:
+Três escolhas que economizam credencial e quota:
 
 * **YouTube pela chave de API, não pelo OAuth.** Views, likes e comentários de
   um vídeo público saem do mesmo `videos.list` que o sourcing já usa — 1
@@ -17,9 +17,17 @@ Duas escolhas que economizam credencial e quota:
   fica NULL e a recalibração de duração degrada para views/hora por faixa —
   pior, mas medido.
 
+* **TikTok pelo mesmo access token da publicação**, mas por outro escopo
+  (`video.list`) e em lotes de 20 ids por chamada. Quem autorizou o app só
+  para publicar continua publicando e não consegue medir — a resposta diz
+  `scope_not_authorized`, e o aviso sai no log sem derrubar as outras
+  plataformas.
+
 Post 'simulado' nunca é medido: ele não existe em plataforma nenhuma, e
 medi-lo devolveria zero para sempre — zeros que entrariam na média e puxariam
-a recalibração para baixo.
+a recalibração para baixo. E post do TikTok que saiu PRIVADO (app ainda não
+revisado) também não: sem id público não há o que consultar, e o que ficou
+gravado foi o publish_id. Ele é pulado com aviso, não com erro.
 """
 import logging
 
@@ -27,12 +35,20 @@ import settings
 from db import repositorio
 from publish import instagram as instagram_mod
 from publish import quota
+from publish import tiktok as tiktok_mod
 from sourcing import youtube as youtube_sourcing
 
 log = logging.getLogger(__name__)
 
 # `videos.list` custa o mesmo do sourcing: 1 unidade por chamada, até 50 ids.
 CUSTO_VIDEOS_LIST = 1
+
+# Quem tem coletor aqui. Derivar o aviso de "plataforma sem métrica" desta
+# lista, em vez de repetir os nomes lá embaixo, é o que faz o aviso sumir
+# sozinho quando a plataforma passa a ser medida.
+PLATAFORMAS_MEDIDAS = (settings.PLATAFORMA_YOUTUBE,
+                       settings.PLATAFORMA_INSTAGRAM,
+                       settings.PLATAFORMA_TIKTOK)
 
 
 class ErroColeta(Exception):
@@ -144,6 +160,98 @@ def metricas_instagram(media_id, token, http=None, base=None):
     return metricas
 
 
+# --- TikTok -------------------------------------------------------------------
+
+# A API aceita até 20 ids por consulta, e recusa o lote inteiro acima disso:
+# quem fatia é o cliente.
+MAX_IDS_TIKTOK = 20
+
+# `share_count` fica de fora, e não por descuido: é um sinal forte no TikTok,
+# mas `resultados` não tem coluna para ele e o schema deste projeto é aditivo
+# (nada de ALTER TABLE). Pedir um campo que seria descartado só aumentaria a
+# resposta. Quando a coluna existir, ele entra aqui e no registrar_resultado.
+CAMPOS_TIKTOK = "id,view_count,like_count,comment_count"
+
+
+def metricas_tiktok(video_ids, token, http=None, base=None):
+    """{video_id: {views, likes, comentarios}} — em lotes de 20.
+
+    O escopo é `video.list`, DIFERENTE do `video.publish` que publica: um app
+    autorizado só para postar responde `scope_not_authorized` aqui, e é essa a
+    mensagem que chega ao log.
+    """
+    ids = [str(v) for v in video_ids]
+    url = tiktok_mod._url("video/query", base) + "?fields=" + CAMPOS_TIKTOK
+
+    saida = {}
+    for inicio in range(0, len(ids), MAX_IDS_TIKTOK):
+        lote = ids[inicio:inicio + MAX_IDS_TIKTOK]
+        dados = tiktok_mod._pedir(url, token, {"filters": {"video_ids": lote}},
+                                  http=http)
+        for video in dados.get("videos") or []:
+            identificador = str(video.get("id") or "")
+            if not identificador:
+                continue
+            saida[identificador] = {
+                # Os dois nomes de view porque a API já chamou o mesmo número
+                # de play_count, e métrica ausente vem omitida em vez de zero.
+                "views": _inteiro(video, "view_count", "play_count"),
+                "likes": _inteiro(video, "like_count"),
+                "comentarios": _inteiro(video, "comment_count"),
+                "retencao": None,
+            }
+
+    faltando = set(ids) - set(saida)
+    if faltando:
+        # Vídeo apagado, ou que a conta tornou privado depois de publicado.
+        # Não é erro do pipeline, e a última medição continua valendo.
+        log.info("Sem métricas para %d vídeo(s) do TikTok: %s",
+                 len(faltando), ", ".join(sorted(faltando)))
+    return saida
+
+
+def medir_tiktok(conn, linhas, http=None):
+    """Mede os posts do TikTok que dá para medir. Devolve quantos entraram.
+
+    Os privados são separados ANTES da chamada: mandar um publish_id no lugar
+    de um id de vídeo não devolve erro útil, devolve um lote sem resultado — e
+    o motivo verdadeiro (o app ainda não passou pela revisão) não apareceria
+    em lugar nenhum.
+    """
+    publicos = [l for l in linhas if tiktok_mod.id_publico(l["id_externo"])]
+    privados = len(linhas) - len(publicos)
+    if privados:
+        log.info(
+            "%d post(s) do TikTok sem id público: saíram como SELF_ONLY, que é "
+            "o que um app não revisado consegue publicar. Não há métrica a "
+            "consultar enquanto for assim.", privados,
+        )
+    if not publicos:
+        return 0
+
+    try:
+        token = tiktok_mod.garantir_token(conn, http=http)
+        metricas = metricas_tiktok([l["id_externo"] for l in publicos], token,
+                                   http=http)
+    except Exception as e:
+        # O TikTok fora do ar, ou sem o escopo video.list, não pode apagar as
+        # medições do YouTube e do Instagram já gravadas nesta execução — nem
+        # impedir a recalibração de rodar sobre elas.
+        log.warning("Métricas do TikTok falharam: %s", e)
+        return 0
+
+    medidos = 0
+    for linha in publicos:
+        dados = metricas.get(str(linha["id_externo"]))
+        if dados is None:
+            continue
+        repositorio.registrar_resultado(
+            conn, linha, dados, horas_publicado=linha["horas_publicado"]
+        )
+        medidos += 1
+    return medidos
+
+
 # --- orquestração -------------------------------------------------------------
 
 def coletar(conn, agora=None, cliente_youtube=None, cliente_analytics=None,
@@ -208,13 +316,17 @@ def coletar(conn, agora=None, cliente_youtube=None, cliente_analytics=None,
             )
             contagem["instagram"] = contagem.get("instagram", 0) + 1
 
-    sem_coletor = sorted(set(por_plataforma) - {settings.PLATAFORMA_YOUTUBE,
-                                                settings.PLATAFORMA_INSTAGRAM})
+    do_tiktok = por_plataforma.get(settings.PLATAFORMA_TIKTOK) or []
+    if do_tiktok:
+        medidos = medir_tiktok(conn, do_tiktok, http=http)
+        if medidos:
+            contagem["tiktok"] = medidos
+
+    sem_coletor = sorted(set(por_plataforma) - set(PLATAFORMAS_MEDIDAS))
     if sem_coletor:
-        # O TikTok publica mas ainda não é medido: a métrica dele sai de outro
-        # escopo de OAuth (video.list), que este projeto não pede. Dizer isso
-        # em voz alta evita a conclusão errada de que aqueles posts não
-        # renderam — eles não foram perguntados.
+        # Uma plataforma nova publica antes de ser medida — é a ordem natural
+        # de implementar. Dizer isso em voz alta evita a conclusão errada de
+        # que aqueles posts não renderam: eles não foram perguntados.
         log.info(
             "Sem coletor de métricas para %s: %d post(s) ficam de fora da "
             "recalibração.", ", ".join(sem_coletor),

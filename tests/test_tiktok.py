@@ -363,3 +363,35 @@ def test_rascunho_na_caixa_de_entrada_avisa_do_escopo(conn, http_falso,
     )])
     tiktok.esperar_publicacao("pub-1", "tok", http=http, dormir=lambda _s: None)
     assert "video.upload" in caplog.text
+
+
+# --- id gravado: dá para medir depois? ----------------------------------------
+
+def test_id_de_video_publico_da_para_consultar():
+    assert tiktok.id_publico("7712345678901234567") is True
+
+
+def test_publish_id_de_post_privado_nao_da():
+    # É o que fica gravado quando o post sai SELF_ONLY, e ele não consulta
+    # métrica nenhuma — só o status da própria publicação.
+    assert tiktok.id_publico("v_pub_file~v2-1.999") is False
+    assert tiktok.id_publico("v_pub_url~v2.123456") is False
+
+
+def test_id_vazio_nao_da():
+    assert tiktok.id_publico("") is False
+    assert tiktok.id_publico(None) is False
+
+
+def test_o_que_publicar_grava_e_o_que_a_etapa_7_le(conn, token_valido, clip,
+                                                   api):
+    # O contrato entre as duas etapas: post público grava id consultável,
+    # post restrito grava publish_id — e a coleta sabe distinguir os dois.
+    publico, _url = tiktok.publicar(conn, clip, "legenda", http=api(),
+                                    agora=AGORA)
+    privado, _sem_url = tiktok.publicar(
+        conn, clip, "legenda", http=api(criador=CRIADOR_RESTRITO, publicos=()),
+        agora=AGORA,
+    )
+    assert tiktok.id_publico(publico) is True
+    assert tiktok.id_publico(privado) is False

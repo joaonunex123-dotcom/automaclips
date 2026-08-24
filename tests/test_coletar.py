@@ -1,4 +1,7 @@
 """Coleta de métricas dos posts publicados."""
+import logging
+from datetime import datetime, timedelta
+
 import pytest
 
 import settings
@@ -231,3 +234,160 @@ def test_sem_post_elegivel_nao_chama_api_nenhuma(conn):
     cliente = ClienteEstatisticasFalso()
     assert coletar.coletar(conn, cliente_youtube=cliente) == {}
     assert cliente.chamadas == []
+
+
+# --- TikTok -------------------------------------------------------------------
+
+VIDEO_ID = "7712345678901234567"
+
+
+@pytest.fixture
+def token_tiktok(conn):
+    """Access token do TikTok longe de vencer — a coleta não tenta renovar."""
+    repositorio.salvar_token(
+        conn, "tiktok", "tok",
+        (datetime.now() + timedelta(hours=12)).isoformat(),
+    )
+
+
+def _resposta_tiktok(resposta_falsa, videos):
+    return resposta_falsa({"data": {"videos": videos}, "error": {"code": "ok"}})
+
+
+def test_le_metricas_do_tiktok(conn, publicado, token_tiktok, http_falso,
+                               resposta_falsa):
+    publicado(plataforma="tiktok", id_externo=VIDEO_ID)
+    http = http_falso([_resposta_tiktok(resposta_falsa, [{
+        "id": VIDEO_ID, "view_count": 41000, "like_count": 3200,
+        "comment_count": 87,
+    }])])
+
+    assert coletar.coletar(conn, http=http, idade_minima_h=1) == {"tiktok": 1}
+
+    linha = repositorio.ultimos_resultados(conn)[0]
+    assert (linha["views"], linha["likes"], linha["comentarios"]) == (41000, 3200, 87)
+    # A plataforma vai gravada: é o que permite a recalibração comparar cada
+    # post contra a mediana da PRÓPRIA plataforma.
+    assert linha["plataforma"] == "tiktok"
+    assert linha["retencao"] is None
+
+
+def test_pede_so_os_campos_que_sabe_gravar(conn, token_tiktok, http_falso,
+                                           resposta_falsa):
+    http = http_falso([_resposta_tiktok(resposta_falsa, [])])
+    coletar.metricas_tiktok([VIDEO_ID], "tok", http=http)
+
+    url = http.chamadas[0]["url"]
+    assert "fields=id,view_count,like_count,comment_count" in url
+    assert http.chamadas[0]["json"] == {"filters": {"video_ids": [VIDEO_ID]}}
+
+
+def test_consulta_em_lotes_de_vinte(conn, token_tiktok, http_falso,
+                                    resposta_falsa):
+    # Acima de 20 ids a API recusa o lote inteiro, então quem fatia é o cliente.
+    ids = [str(7000000000000000000 + n) for n in range(25)]
+    http = http_falso([_resposta_tiktok(resposta_falsa, []),
+                       _resposta_tiktok(resposta_falsa, [])])
+
+    coletar.metricas_tiktok(ids, "tok", http=http)
+
+    tamanhos = [len(c["json"]["filters"]["video_ids"]) for c in http.chamadas]
+    assert tamanhos == [20, 5]
+
+
+def test_post_privado_do_tiktok_e_pulado_com_aviso(conn, publicado,
+                                                   token_tiktok, http_falso,
+                                                   caplog):
+    # App não revisado publica SELF_ONLY, e o que ficou gravado foi o
+    # publish_id: não há id de vídeo para consultar.
+    caplog.set_level(logging.INFO)
+    publicado(plataforma="tiktok", id_externo="v_pub_file~v2-1.999")
+    http = http_falso([])
+
+    assert coletar.coletar(conn, http=http, idade_minima_h=1) == {}
+    assert http.chamadas == []
+    assert "SELF_ONLY" in caplog.text
+
+
+def test_privado_nao_impede_de_medir_o_publico(conn, publicado, token_tiktok,
+                                               http_falso, resposta_falsa):
+    publicado(plataforma="tiktok", id_externo="v_pub_file~v2-1.999")
+    publicado(plataforma="tiktok", id_externo=VIDEO_ID)
+    http = http_falso([_resposta_tiktok(resposta_falsa, [{
+        "id": VIDEO_ID, "view_count": 10,
+    }])])
+
+    assert coletar.coletar(conn, http=http, idade_minima_h=1) == {"tiktok": 1}
+    assert http.chamadas[0]["json"]["filters"]["video_ids"] == [VIDEO_ID]
+
+
+def test_metrica_ausente_do_tiktok_vira_zero(conn, publicado, token_tiktok,
+                                             http_falso, resposta_falsa):
+    # A API omite o campo em vez de mandar zero.
+    publicado(plataforma="tiktok", id_externo=VIDEO_ID)
+    http = http_falso([_resposta_tiktok(resposta_falsa, [{"id": VIDEO_ID}])])
+
+    coletar.coletar(conn, http=http, idade_minima_h=1)
+    linha = repositorio.ultimos_resultados(conn)[0]
+    assert (linha["views"], linha["likes"], linha["comentarios"]) == (0, 0, 0)
+
+
+def test_video_apagado_no_tiktok_nao_derruba_os_outros(conn, publicado,
+                                                       token_tiktok, http_falso,
+                                                       resposta_falsa, caplog):
+    caplog.set_level(logging.INFO)
+    publicado(plataforma="tiktok", id_externo=VIDEO_ID)
+    publicado(plataforma="tiktok", id_externo="7799999999999999999")
+    http = http_falso([_resposta_tiktok(resposta_falsa, [{
+        "id": VIDEO_ID, "view_count": 5,
+    }])])
+
+    assert coletar.coletar(conn, http=http, idade_minima_h=1) == {"tiktok": 1}
+    assert "Sem métricas" in caplog.text
+
+
+def test_escopo_faltando_avisa_e_nao_derruba_o_youtube(conn, publicado,
+                                                       token_tiktok, http_falso,
+                                                       resposta_falsa, caplog):
+    # Quem autorizou o app só para publicar não consegue medir. O YouTube da
+    # mesma execução já foi gravado e não pode ser perdido por causa disso.
+    publicado(plataforma="youtube", id_externo="abc")
+    publicado(plataforma="tiktok", id_externo=VIDEO_ID)
+    cliente = ClienteEstatisticasFalso({"abc": {"viewCount": "100"}})
+    http = http_falso([resposta_falsa(
+        {"error": {"code": "scope_not_authorized",
+                   "message": "video.list is required"}},
+        status_code=403,
+    )])
+
+    contagem = coletar.coletar(conn, cliente_youtube=cliente, http=http,
+                               idade_minima_h=1)
+    assert contagem == {"youtube": 1}
+    assert "scope_not_authorized" in caplog.text
+    assert repositorio.contar_resultados(conn) == 1
+
+
+def test_token_do_tiktok_e_renovado_antes_de_medir(conn, publicado, monkeypatch,
+                                                   http_falso, resposta_falsa):
+    # O access token vale ~24 h: uma coleta diária quase sempre pega um token
+    # vencido, e renovar é obrigação do programa.
+    monkeypatch.setattr(settings, "TIKTOK_CLIENT_KEY", "chave")
+    monkeypatch.setattr(settings, "TIKTOK_CLIENT_SECRET", "segredo")
+    monkeypatch.setattr(settings, "TIKTOK_ACCESS_TOKEN", "velho")
+    monkeypatch.setattr(settings, "TIKTOK_REFRESH_TOKEN", "refresh-1")
+    publicado(plataforma="tiktok", id_externo=VIDEO_ID)
+    http = http_falso([
+        resposta_falsa({"access_token": "novo", "refresh_token": "refresh-2",
+                        "expires_in": 86400}),
+        _resposta_tiktok(resposta_falsa, [{"id": VIDEO_ID, "view_count": 7}]),
+    ])
+
+    assert coletar.coletar(conn, http=http, idade_minima_h=1) == {"tiktok": 1}
+    assert http.chamadas[1]["headers"]["Authorization"] == "Bearer novo"
+
+
+def test_plataforma_sem_coletor_continua_avisando(conn, publicado, caplog):
+    caplog.set_level(logging.INFO)
+    publicado(plataforma="twitch", id_externo="123")
+    assert coletar.coletar(conn, idade_minima_h=1) == {}
+    assert "Sem coletor de métricas para twitch" in caplog.text
