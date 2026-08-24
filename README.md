@@ -313,12 +313,17 @@ publicação com o escopo `video.list` — em lotes de 20 ids por chamada. Uma
 plataforma fora do ar não derruba a medição das outras: o erro fica no log e
 a recalibração roda sobre o que já foi medido.
 
-Cada medição grava views, likes, comentários e **compartilhamentos**. O
-último só o TikTok informa — o YouTube não o expõe no `videos.list` e o
-Instagram precisaria de outra métrica de insights —, então ele fica 0 nas
-outras duas. Nenhuma recalibração lê essa coluna hoje: ela é gravada para o
-histórico existir quando alguém for olhar, que é o contrário de descobrir
-daqui a seis meses que o número nunca foi guardado.
+Cada medição grava views, likes, comentários e **compartilhamentos** — o
+TikTok pelo `share_count`, o Instagram pelo insight `shares`, e 0 no YouTube,
+que não expõe o número no `videos.list`. No Instagram o share vai pedido na
+mesma chamada de insights que já buscava os plays, com uma segunda tentativa
+sem ele caso a versão da API não conheça o nome: um `metric` desconhecido
+derruba a chamada inteira, e perder as views por causa do compartilhamento
+seria trocar o número que a recalibração usa por um que ninguém lê ainda.
+
+Nenhuma recalibração lê essa coluna hoje: ela é gravada para o histórico
+existir quando alguém for olhar, que é o contrário de descobrir daqui a seis
+meses que o número nunca foi guardado.
 
 Canal fraco é julgado pela **mediana**, não pela média: um único clip que
 viralizou levantaria a média de um canal que não rende, e é justamente o canal

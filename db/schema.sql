@@ -418,10 +418,10 @@ CREATE TABLE IF NOT EXISTS resultados (
     views          INTEGER NOT NULL DEFAULT 0,
     likes          INTEGER NOT NULL DEFAULT 0,
     comentarios    INTEGER NOT NULL DEFAULT 0,
-    -- Compartilhamento é o sinal mais forte do TikTok: quem manda um clip
-    -- para alguém está fazendo a distribuição que o algoritmo cobra. Fica 0
-    -- onde a plataforma não informa — o YouTube não expõe o número no
-    -- videos.list, e o Instagram exigiria outra métrica de insights.
+    -- Compartilhamento é o sinal mais forte do TikTok, e o Instagram informa
+    -- o equivalente: quem manda um clip para alguém está fazendo a
+    -- distribuição que o algoritmo cobra. Fica 0 no YouTube, que não expõe o
+    -- número no videos.list.
     compartilhamentos INTEGER NOT NULL DEFAULT 0,
     -- Fração média assistida (0–1). NULL é o normal: exige a YouTube Analytics
     -- API, que é outro escopo de OAuth — ver settings.ANALYTICS_RETENCAO.

@@ -123,11 +123,63 @@ def retencao_youtube(cliente_analytics, video_id):
 
 # --- Instagram ----------------------------------------------------------------
 
-def metricas_instagram(media_id, token, http=None, base=None):
-    """{views, likes, comentarios} de um Reel.
+# Métricas de insights de um Reel. `shares` é o compartilhamento; `reach` é
+# pedido desde antes e ainda não tem coluna que o guarde.
+METRICAS_INSTAGRAM = "plays,reach,shares"
 
-    Likes e comentários vêm dos campos do próprio objeto (mais estáveis); o
-    número de plays vem de `insights`, que é onde ele mora.
+# A lista que rodava antes de `shares` entrar, e que serve de segunda
+# tentativa. Um `metric` com um nome que aquela versão da API não conhece
+# derruba a chamada INTEIRA — não devolve os outros e ignora o desconhecido —,
+# e perder as views por causa do compartilhamento seria trocar o número que a
+# recalibração usa por um que ninguém lê ainda. Na dúvida, a view ganha.
+METRICAS_INSTAGRAM_MINIMAS = "plays,reach"
+
+# Nome do insight -> chave nossa. `plays` e `views` são o MESMO número em
+# versões diferentes da API: a Meta renomeou a métrica, e aceitar os dois
+# nomes evita que a renomeação vire uma série histórica de zeros.
+_CHAVE_DE_INSIGHT = {
+    "plays": "views",
+    "views": "views",
+    "shares": "compartilhamentos",
+}
+
+
+def insights_instagram(media_id, token, http=None, base=None, metricas=None):
+    """A resposta de /insights, caindo na lista mínima se a completa falhar.
+
+    Duas tentativas no máximo, e a segunda só acontece quando a primeira
+    falha: no caminho normal isto é uma chamada, igual a antes.
+    """
+    base = base or settings.INSTAGRAM_API_BASE
+    listas = [metricas or METRICAS_INSTAGRAM]
+    if listas[0] != METRICAS_INSTAGRAM_MINIMAS:
+        listas.append(METRICAS_INSTAGRAM_MINIMAS)
+
+    for indice, lista in enumerate(listas):
+        try:
+            return instagram_mod._pedir(
+                "GET", f"{base}/{media_id}/insights",
+                {"metric": lista, "access_token": token}, http=http,
+            )
+        except instagram_mod.ErroInstagram as e:
+            if indice == len(listas) - 1:
+                # Insights somem para mídia antiga e para conta que perdeu o
+                # vínculo com a página. Likes e comentários já foram lidos e
+                # continuam valendo.
+                log.info("Insights indisponíveis para %s: %s", media_id, e)
+                return {}
+            log.info(
+                "Insights com '%s' falharam para %s (%s); tentando '%s'.",
+                lista, media_id, e, listas[indice + 1],
+            )
+    return {}
+
+
+def metricas_instagram(media_id, token, http=None, base=None):
+    """{views, likes, comentarios, compartilhamentos} de um Reel.
+
+    Likes e comentários vêm dos campos do próprio objeto (mais estáveis); os
+    plays e os compartilhamentos vêm de `insights`, que é onde eles moram.
     """
     base = base or settings.INSTAGRAM_API_BASE
     campos = instagram_mod._pedir(
@@ -139,24 +191,17 @@ def metricas_instagram(media_id, token, http=None, base=None):
         "views": 0,
         "likes": _inteiro(campos, "like_count"),
         "comentarios": _inteiro(campos, "comments_count"),
+        "compartilhamentos": 0,
         "retencao": None,
     }
 
-    try:
-        insights = instagram_mod._pedir(
-            "GET", f"{base}/{media_id}/insights",
-            {"metric": "plays,reach", "access_token": token}, http=http,
-        )
-    except instagram_mod.ErroInstagram as e:
-        # Insights somem para mídia antiga e para conta que perdeu o vínculo
-        # com a página. Likes e comentários já foram lidos e continuam valendo.
-        log.info("Insights indisponíveis para %s: %s", media_id, e)
-        return metricas
-
+    insights = insights_instagram(media_id, token, http=http, base=base)
     for entrada in insights.get("data") or []:
+        chave = _CHAVE_DE_INSIGHT.get(entrada.get("name"))
+        if not chave:
+            continue
         valores = entrada.get("values") or [{}]
-        if entrada.get("name") == "plays":
-            metricas["views"] = _inteiro(valores[0], "value")
+        metricas[chave] = _inteiro(valores[0], "value")
     return metricas
 
 
@@ -167,9 +212,9 @@ def metricas_instagram(media_id, token, http=None, base=None):
 MAX_IDS_TIKTOK = 20
 
 # `share_count` entra porque é o sinal mais forte daqui: quem manda o clip
-# para alguém está fazendo a distribuição que o algoritmo cobra. É a única
-# plataforma das três que informa o número, e a coluna `compartilhamentos`
-# fica 0 nas outras duas.
+# para alguém está fazendo a distribuição que o algoritmo cobra. O Instagram
+# informa o equivalente (`shares`, nos insights); o YouTube não expõe nenhum,
+# e a coluna `compartilhamentos` fica 0 lá.
 CAMPOS_TIKTOK = "id,view_count,like_count,comment_count,share_count"
 
 

@@ -205,6 +205,89 @@ def test_midia_sumida_nao_derruba_as_outras(conn, publicado, http_falso,
     assert coletar.coletar(conn, http=http, idade_minima_h=1) == {"instagram": 1}
 
 
+def test_le_shares_do_instagram(conn, publicado, http_falso, resposta_falsa,
+                                monkeypatch):
+    monkeypatch.setattr(settings, "INSTAGRAM_TOKEN_INICIAL", "tok")
+    publicado(plataforma="instagram", id_externo="media9")
+    http = http_falso([
+        resposta_falsa({"access_token": "novo", "expires_in": 5184000}),
+        resposta_falsa({"like_count": 120, "comments_count": 8}),
+        resposta_falsa({"data": [
+            {"name": "plays", "values": [{"value": 9000}]},
+            {"name": "shares", "values": [{"value": 210}]},
+        ]}),
+    ])
+
+    coletar.coletar(conn, http=http, idade_minima_h=1)
+
+    linha = repositorio.ultimos_resultados(conn)[0]
+    assert (linha["views"], linha["compartilhamentos"]) == (9000, 210)
+    # Uma chamada de insights só: o share vem junto, não custa round-trip.
+    insights = [c for c in http.chamadas if c["url"].endswith("/insights")]
+    assert len(insights) == 1
+    assert insights[0]["params"]["metric"] == "plays,reach,shares"
+
+
+def test_metrica_recusada_cai_na_lista_minima(conn, publicado, http_falso,
+                                              resposta_falsa, monkeypatch,
+                                              caplog):
+    # Um `metric` com nome que aquela versão da API não conhece derruba a
+    # chamada INTEIRA. Perder as views por causa do compartilhamento seria
+    # trocar o número que a recalibração usa por um que ninguém lê ainda.
+    caplog.set_level(logging.INFO)
+    monkeypatch.setattr(settings, "INSTAGRAM_TOKEN_INICIAL", "tok")
+    publicado(plataforma="instagram", id_externo="media9")
+    http = http_falso([
+        resposta_falsa({"access_token": "novo", "expires_in": 5184000}),
+        resposta_falsa({"like_count": 120, "comments_count": 8}),
+        resposta_falsa({"error": {"message": "(#100) shares is not supported"}},
+                       status_code=400),
+        resposta_falsa({"data": [{"name": "plays", "values": [{"value": 9000}]}]}),
+    ])
+
+    coletar.coletar(conn, http=http, idade_minima_h=1)
+
+    linha = repositorio.ultimos_resultados(conn)[0]
+    assert (linha["views"], linha["compartilhamentos"]) == (9000, 0)
+    pedidos = [c["params"]["metric"] for c in http.chamadas
+               if c["url"].endswith("/insights")]
+    assert pedidos == ["plays,reach,shares", "plays,reach"]
+    assert "tentando" in caplog.text
+
+
+def test_insights_fora_do_ar_nas_duas_tentativas_mantem_likes(
+        conn, publicado, http_falso, resposta_falsa, monkeypatch):
+    monkeypatch.setattr(settings, "INSTAGRAM_TOKEN_INICIAL", "tok")
+    publicado(plataforma="instagram", id_externo="media9")
+    erro = lambda: resposta_falsa({"error": {"message": "mídia antiga"}},
+                                  status_code=400)
+    http = http_falso([
+        resposta_falsa({"access_token": "novo", "expires_in": 5184000}),
+        resposta_falsa({"like_count": 120, "comments_count": 8}),
+        erro(), erro(),
+    ])
+
+    coletar.coletar(conn, http=http, idade_minima_h=1)
+    linha = repositorio.ultimos_resultados(conn)[0]
+    assert (linha["likes"], linha["views"], linha["compartilhamentos"]) == (120, 0, 0)
+
+
+def test_nome_novo_da_metrica_de_view_e_aceito(conn, publicado, http_falso,
+                                               resposta_falsa, monkeypatch):
+    # A Meta renomeou plays -> views. Ler só um dos nomes faria a renomeação
+    # virar uma série histórica de zeros silenciosos.
+    monkeypatch.setattr(settings, "INSTAGRAM_TOKEN_INICIAL", "tok")
+    publicado(plataforma="instagram", id_externo="media9")
+    http = http_falso([
+        resposta_falsa({"access_token": "novo", "expires_in": 5184000}),
+        resposta_falsa({"like_count": 1, "comments_count": 0}),
+        resposta_falsa({"data": [{"name": "views", "values": [{"value": 700}]}]}),
+    ])
+
+    coletar.coletar(conn, http=http, idade_minima_h=1)
+    assert repositorio.ultimos_resultados(conn)[0]["views"] == 700
+
+
 # --- histórico ----------------------------------------------------------------
 
 def test_cada_coleta_anexa_uma_medicao(conn, publicado):
