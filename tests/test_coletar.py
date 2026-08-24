@@ -272,13 +272,46 @@ def test_le_metricas_do_tiktok(conn, publicado, token_tiktok, http_falso,
     assert linha["retencao"] is None
 
 
+def test_grava_compartilhamentos_do_tiktok(conn, publicado, token_tiktok,
+                                           http_falso, resposta_falsa):
+    # É o sinal mais forte daqui: quem manda o clip para alguém faz a
+    # distribuição que o algoritmo cobra.
+    publicado(plataforma="tiktok", id_externo=VIDEO_ID)
+    http = http_falso([_resposta_tiktok(resposta_falsa, [{
+        "id": VIDEO_ID, "view_count": 41000, "share_count": 640,
+    }])])
+
+    coletar.coletar(conn, http=http, idade_minima_h=1)
+    assert repositorio.ultimos_resultados(conn)[0]["compartilhamentos"] == 640
+
+
+def test_share_ausente_vira_zero(conn, publicado, token_tiktok, http_falso,
+                                 resposta_falsa):
+    publicado(plataforma="tiktok", id_externo=VIDEO_ID)
+    http = http_falso([_resposta_tiktok(resposta_falsa, [{"id": VIDEO_ID}])])
+
+    coletar.coletar(conn, http=http, idade_minima_h=1)
+    assert repositorio.ultimos_resultados(conn)[0]["compartilhamentos"] == 0
+
+
+def test_plataforma_que_nao_informa_share_grava_zero(conn, publicado):
+    # O YouTube não expõe compartilhamento no videos.list, e um coletor que
+    # não traz o número não pode derrubar a gravação do resto.
+    publicado(id_externo="abc")
+    cliente = ClienteEstatisticasFalso({"abc": {"viewCount": "100"}})
+    coletar.coletar(conn, cliente_youtube=cliente, idade_minima_h=1)
+
+    linha = repositorio.ultimos_resultados(conn)[0]
+    assert (linha["views"], linha["compartilhamentos"]) == (100, 0)
+
+
 def test_pede_so_os_campos_que_sabe_gravar(conn, token_tiktok, http_falso,
                                            resposta_falsa):
     http = http_falso([_resposta_tiktok(resposta_falsa, [])])
     coletar.metricas_tiktok([VIDEO_ID], "tok", http=http)
 
     url = http.chamadas[0]["url"]
-    assert "fields=id,view_count,like_count,comment_count" in url
+    assert "fields=id,view_count,like_count,comment_count,share_count" in url
     assert http.chamadas[0]["json"] == {"filters": {"video_ids": [VIDEO_ID]}}
 
 

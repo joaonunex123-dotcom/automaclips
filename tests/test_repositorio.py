@@ -547,3 +547,61 @@ def test_clip_sem_midia_ainda_aparece_na_fila(conn, clip_id):
     # editar.py, com mensagem. Sumir da fila em silêncio seria pior.
     repositorio.registrar_clips(conn, clip_id, [_clip()])
     assert len(repositorio.clips_para_renderizar(conn)) == 1
+
+
+# --- coluna acrescentada a banco que já existia -------------------------------
+
+def _colunas(conn, tabela):
+    return {l["name"] for l in conn.execute(f"PRAGMA table_info({tabela})")}
+
+
+def test_banco_novo_ja_nasce_com_as_colunas(conn):
+    # Numa base nova o CREATE TABLE traz tudo, e o ADD COLUMN não faz nada.
+    assert "compartilhamentos" in _colunas(conn, "resultados")
+    assert repositorio.aplicar_colunas_novas(conn) == []
+
+
+def test_coluna_nova_entra_no_banco_que_ja_estava_em_uso(conn):
+    # O banco de quem já rodava a etapa 7 foi criado sem a coluna. Sem o ADD
+    # COLUMN, o INSERT da coleta falharia em toda instalação existente — e a
+    # saída seria apagar o clips.db, que é o histórico inteiro.
+    conn.execute("ALTER TABLE resultados DROP COLUMN compartilhamentos")
+    assert "compartilhamentos" not in _colunas(conn, "resultados")
+
+    outra = repositorio.conectar()
+    try:
+        assert "compartilhamentos" in _colunas(outra, "resultados")
+    finally:
+        outra.close()
+
+
+def test_aplicar_colunas_e_idempotente(conn):
+    conn.execute("ALTER TABLE resultados DROP COLUMN compartilhamentos")
+    assert repositorio.aplicar_colunas_novas(conn) == ["resultados.compartilhamentos"]
+    assert repositorio.aplicar_colunas_novas(conn) == []
+
+
+def test_tabela_inexistente_e_ignorada(conn):
+    # Quem cria tabela é o CREATE do schema; este laço só acrescenta coluna.
+    assert repositorio.aplicar_colunas_novas(
+        conn, [("tabela_que_nao_existe", "x", "TEXT")]
+    ) == []
+
+
+def test_dado_antigo_sobrevive_a_coluna_nova(conn, clip_publicavel):
+    clip_id = clip_publicavel()
+    pub_id = repositorio.agendar_publicacao(conn, clip_id, "youtube",
+                                            "2026-08-10 12:00:00")
+    conn.execute("ALTER TABLE resultados DROP COLUMN compartilhamentos")
+    conn.execute(
+        "INSERT INTO resultados (publicacao_id, clip_id, plataforma, views)"
+        " VALUES (?, ?, 'youtube', 4200)", (pub_id, clip_id)
+    )
+    outra = repositorio.conectar()
+    try:
+        linha = outra.execute("SELECT * FROM resultados").fetchone()
+        assert linha["views"] == 4200
+        # A linha antiga não tinha o número; o default responde por ela.
+        assert linha["compartilhamentos"] == 0
+    finally:
+        outra.close()

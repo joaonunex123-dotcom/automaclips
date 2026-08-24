@@ -166,11 +166,11 @@ def metricas_instagram(media_id, token, http=None, base=None):
 # quem fatia é o cliente.
 MAX_IDS_TIKTOK = 20
 
-# `share_count` fica de fora, e não por descuido: é um sinal forte no TikTok,
-# mas `resultados` não tem coluna para ele e o schema deste projeto é aditivo
-# (nada de ALTER TABLE). Pedir um campo que seria descartado só aumentaria a
-# resposta. Quando a coluna existir, ele entra aqui e no registrar_resultado.
-CAMPOS_TIKTOK = "id,view_count,like_count,comment_count"
+# `share_count` entra porque é o sinal mais forte daqui: quem manda o clip
+# para alguém está fazendo a distribuição que o algoritmo cobra. É a única
+# plataforma das três que informa o número, e a coluna `compartilhamentos`
+# fica 0 nas outras duas.
+CAMPOS_TIKTOK = "id,view_count,like_count,comment_count,share_count"
 
 
 def metricas_tiktok(video_ids, token, http=None, base=None):
@@ -198,6 +198,7 @@ def metricas_tiktok(video_ids, token, http=None, base=None):
                 "views": _inteiro(video, "view_count", "play_count"),
                 "likes": _inteiro(video, "like_count"),
                 "comentarios": _inteiro(video, "comment_count"),
+                "compartilhamentos": _inteiro(video, "share_count"),
                 "retencao": None,
             }
 

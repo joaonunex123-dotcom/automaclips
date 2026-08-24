@@ -16,9 +16,22 @@
 --
 -- Este arquivo cobre as sete etapas. Cada bloco abaixo foi acrescentado
 -- quando havia código que o escrevesse — nada de schema adivinhado — e
--- sempre de forma ADITIVA: só CREATE TABLE IF NOT EXISTS, nenhum ALTER, o
--- que torna aplicar sobre um banco antigo inofensivo e dispensa um sistema
--- de migração.
+-- sempre de forma ADITIVA: aplicar sobre um banco antigo é inofensivo.
+--
+-- Aditivo aqui quer dizer duas coisas, e só estas duas:
+--
+--   1. CREATE TABLE / CREATE INDEX, sempre IF NOT EXISTS. Tabela que já
+--      existe não é tocada.
+--   2. Coluna NOVA numa tabela que já existe, declarada em
+--      db/repositorio.COLUNAS_ACRESCENTADAS e aplicada por ADD COLUMN quando
+--      falta. O CREATE TABLE aqui embaixo já nasce com ela, então banco novo
+--      nunca passa pelo ADD COLUMN — ele existe só para o banco que foi
+--      criado antes da coluna.
+--
+-- O que continua fora: renomear coluna, mudar tipo, apagar coluna, mexer em
+-- dado existente. Qualquer uma dessas deixaria de ser inofensiva sobre um
+-- banco em uso, e aí a conversa passa a ser sobre sistema de migração de
+-- verdade.
 
 -- Um vídeo-FONTE descoberto num canal monitorado. Não é o clip cortado: é o
 -- material bruto de onde os clips da etapa 2 vão sair.
@@ -405,6 +418,11 @@ CREATE TABLE IF NOT EXISTS resultados (
     views          INTEGER NOT NULL DEFAULT 0,
     likes          INTEGER NOT NULL DEFAULT 0,
     comentarios    INTEGER NOT NULL DEFAULT 0,
+    -- Compartilhamento é o sinal mais forte do TikTok: quem manda um clip
+    -- para alguém está fazendo a distribuição que o algoritmo cobra. Fica 0
+    -- onde a plataforma não informa — o YouTube não expõe o número no
+    -- videos.list, e o Instagram exigiria outra métrica de insights.
+    compartilhamentos INTEGER NOT NULL DEFAULT 0,
     -- Fração média assistida (0–1). NULL é o normal: exige a YouTube Analytics
     -- API, que é outro escopo de OAuth — ver settings.ANALYTICS_RETENCAO.
     -- A recalibração de duração degrada para views/hora quando falta.

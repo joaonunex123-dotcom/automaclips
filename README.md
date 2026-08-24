@@ -313,6 +313,13 @@ publicação com o escopo `video.list` — em lotes de 20 ids por chamada. Uma
 plataforma fora do ar não derruba a medição das outras: o erro fica no log e
 a recalibração roda sobre o que já foi medido.
 
+Cada medição grava views, likes, comentários e **compartilhamentos**. O
+último só o TikTok informa — o YouTube não o expõe no `videos.list` e o
+Instagram precisaria de outra métrica de insights —, então ele fica 0 nas
+outras duas. Nenhuma recalibração lê essa coluna hoje: ela é gravada para o
+histórico existir quando alguém for olhar, que é o contrário de descobrir
+daqui a seis meses que o número nunca foi guardado.
+
 Canal fraco é julgado pela **mediana**, não pela média: um único clip que
 viralizou levantaria a média de um canal que não rende, e é justamente o canal
 que acerta uma vez a cada vinte que se quer desligar. E ele é *desativado*, não
@@ -465,7 +472,7 @@ que mais nada mude.
 
 ```
 settings.py                  todo número ajustável, sobrescrevível por env var
-db/schema.sql                schema do clips.db, idempotente
+db/schema.sql                schema do clips.db, idempotente (e só aditivo)
 db/repositorio.py            acesso a dado puro (WAL, BEGIN IMMEDIATE)
 
 sourcing/canais.py           lê canais.json

@@ -56,6 +56,47 @@ CLIP_DESCARTADO = "descartado"
 # Espera máxima por um lock de escrita, em milissegundos.
 BUSY_TIMEOUT_MS = 5000
 
+# Colunas que nasceram depois do banco. O CREATE TABLE do schema.sql já as
+# traz, então banco novo nunca passa por aqui; esta lista existe para o banco
+# que já estava em uso quando a coluna foi criada — sem ela, o INSERT que
+# escreve a coluna nova falharia em toda instalação existente, e a alternativa
+# seria pedir para apagar o clips.db (que é o histórico inteiro da etapa 7).
+#
+# (tabela, coluna, definição). Só ADD COLUMN: renomear, mudar tipo ou apagar
+# não cabe aqui — ver o cabeçalho de db/schema.sql.
+#
+# Efeito colateral inofensivo: no banco migrado a coluna fica no FIM da tabela,
+# e no banco novo na posição em que o CREATE TABLE a declara. Nada neste
+# módulo lê coluna por posição (row_factory é Row, e todo INSERT nomeia as
+# colunas), então os dois bancos se comportam igual.
+COLUNAS_ACRESCENTADAS = (
+    ("resultados", "compartilhamentos", "INTEGER NOT NULL DEFAULT 0"),
+)
+
+
+def _colunas(conn, tabela):
+    return {linha["name"] for linha in conn.execute(f"PRAGMA table_info({tabela})")}
+
+
+def aplicar_colunas_novas(conn, colunas=COLUNAS_ACRESCENTADAS):
+    """ADD COLUMN do que faltar. Idempotente. Devolve o que acrescentou.
+
+    Roda DEPOIS do schema: numa base nova as tabelas acabaram de ser criadas
+    já com as colunas, e o laço não faz nada. Tabela ausente é ignorada em vez
+    de virar erro — quem cria tabela é o CREATE do schema, não este laço.
+    """
+    acrescentadas = []
+    for tabela, coluna, definicao in colunas:
+        existentes = _colunas(conn, tabela)
+        if not existentes or coluna in existentes:
+            continue
+        conn.execute(f"ALTER TABLE {tabela} ADD COLUMN {coluna} {definicao}")
+        acrescentadas.append(f"{tabela}.{coluna}")
+    if acrescentadas:
+        log.info("Colunas acrescentadas ao banco existente: %s.",
+                 ", ".join(acrescentadas))
+    return acrescentadas
+
 
 def conectar(caminho=None):
     """Abre conexão, liga os PRAGMAs e aplica o schema (idempotente).
@@ -73,6 +114,7 @@ def conectar(caminho=None):
     conn.execute("PRAGMA foreign_keys=ON")
     with open(settings.SCHEMA_PATH, encoding="utf-8") as f:
         conn.executescript(f.read())
+    aplicar_colunas_novas(conn)
     return conn
 
 
@@ -661,8 +703,9 @@ def registrar_resultado(conn, publicacao, metricas, horas_publicado=0.0):
             "INSERT INTO resultados"
             " (publicacao_id, clip_id, plataforma, canal_id_fonte, canal_fonte,"
             "  trecho_inicio_s, trecho_duracao_s, score_previsto,"
-            "  views, likes, comentarios, retencao, horas_publicado)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "  views, likes, comentarios, compartilhamentos, retencao,"
+            "  horas_publicado)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 publicacao["id"], publicacao["clip_id"], publicacao["plataforma"],
                 publicacao["canal_id_fonte"] or "", publicacao["canal_fonte"] or "",
@@ -672,6 +715,9 @@ def registrar_resultado(conn, publicacao, metricas, horas_publicado=0.0):
                 int(metricas.get("views") or 0),
                 int(metricas.get("likes") or 0),
                 int(metricas.get("comentarios") or 0),
+                # Ausente é 0 e não erro: só o TikTok informa o número, e um
+                # coletor que não o traz não pode derrubar a gravação.
+                int(metricas.get("compartilhamentos") or 0),
                 metricas.get("retencao"),
                 float(horas_publicado or 0),
             ),
