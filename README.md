@@ -367,6 +367,70 @@ simples de começar, mas se o processo morrer ninguém o levanta — e num
 pipeline que publica em horário marcado isso é perder a janela sem aviso.
 `--uma-vez` também não precisa do APScheduler instalado.
 
+## Vários canais
+
+Um **perfil** é um canal de destino: fontes próprias, banco próprio, mídia
+própria e contas próprias nas três plataformas. Quem tem um canal só nunca
+precisa saber que isso existe — sem nenhum `.env.<nome>` na raiz, tudo roda
+como sempre rodou.
+
+```bash
+cp .env.example .env.esportes     # as credenciais DAQUELE canal
+cp .env.example .env.podcast
+
+python -m orchestrator.perfis --listar
+python -m orchestrator.perfis --verificar
+python -m orchestrator.perfis --uma-vez        # todos, em sequência
+python -m orchestrator.perfis --uma-vez --perfil esportes
+```
+
+O `.env.<nome>` é o que define o canal; os dados dele nascem sozinhos em
+`perfis/<nome>/`:
+
+```
+perfis/esportes/clips.db            fila, clips, publicações e resultados
+perfis/esportes/canais.json         os canais-fonte deste canal
+perfis/esportes/downloads/          vídeo, áudio e transcrições
+perfis/esportes/render/             os clips prontos
+perfis/esportes/youtube_token.json  a autorização DESTE canal do YouTube
+```
+
+Três decisões que valem explicação:
+
+* **Um processo por perfil.** O `settings` resolve os caminhos uma vez, no
+  import, e congela; trocar de canal dentro do mesmo processo pediria
+  recarregar o módulo e todos que já leram valores dele. O que sobraria seria
+  um sistema em que um esquecimento publica o clip de um canal na conta do
+  outro — sem desfazer. Um processo por perfil torna isso impossível por
+  construção, e custa um `python` a mais por ciclo.
+* **O `.env` comum fica por baixo.** O `.env.<nome>` é lido primeiro e o `.env`
+  depois, e o primeiro a definir uma chave vence. Então `OPENROUTER_API_KEY` e
+  `YOUTUBE_API_KEY` ficam num arquivo só, e cada `.env.<nome>` carrega apenas o
+  que é daquele canal. A precedência completa é shell > `.env.<nome>` > `.env`.
+* **O client secret é do projeto, o token é do canal.** O
+  `client_secrets.json` do Google Cloud continua na raiz e serve a todos; o
+  `youtube_token.json`, que é a autorização de um canal específico, vai para
+  dentro do perfil. Para autorizar cada um:
+
+  ```bash
+  CLIPS_PERFIL=esportes python -m publish.publicar --autorizar
+  ```
+
+**A quota do YouTube não se multiplica com os canais.** O teto de 10.000
+unidades por dia é do PROJETO do Google Cloud: com três canais no mesmo
+projeto, os seis uploads diários são divididos entre eles, não seis para cada.
+Canal com projeto próprio (e `YOUTUBE_API_KEY`/`YOUTUBE_CLIENT_SECRETS`
+próprios no `.env` dele) tem quota própria.
+
+**O freio de emergência tem dois níveis.** `PARAR_PUBLICACAO` na raiz do
+projeto para **todos** os canais; o mesmo arquivo dentro de `perfis/<nome>/`
+para só aquele. Quem cria o arquivo no meio de um incidente quer que tudo
+pare, não que pare o canal cujo nome lembrou de digitar.
+
+Falha de um canal **não interrompe os outros**: cada perfil é um processo, e o
+resumo do fim diz quem passou e quem não. `--verificar` sai com código 1 se
+algum canal tiver impedimento.
+
 ## Ligando a publicação real
 
 **O padrão é `AUTO_PUBLISH=false`.** Post público não tem desfazer, então a
@@ -512,6 +576,7 @@ publish/publicar.py          agenda, publica ou simula
 publish/preflight.py         confere se a publicação real pode ser ligada
 
 orchestrator/main_loop.py    roda tudo no relógio, com falha isolada
+orchestrator/perfis.py       roda o pipeline de cada canal, um processo por perfil
 
 analytics/coletar.py         mede a performance de cada post
 analytics/recalibrate.py     as quatro recalibrações

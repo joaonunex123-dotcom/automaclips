@@ -1,6 +1,9 @@
-# Segredos — todas as chaves de API vivem aqui, nunca no código.
+# Segredos — todas as chaves de API vivem aqui, nunca no código. O
+# .env.<perfil> é a configuração de um canal de destino (ver README, "Vários
+# canais"), e leva as credenciais dele.
 .env
-.env.local
+.env.*
+!.env.example
 *.pem
 *.key
 credentials.json
@@ -9,6 +12,10 @@ token.json
 # Freio de emergencia: a presenca deste arquivo bloqueia toda
 # publicacao. E estado da maquina, nao do projeto.
 PARAR_PUBLICACAO
+
+# Dados de cada canal: banco, mídia, canais.json e o token do YouTube daquele
+# perfil. Mesma natureza do que está listado abaixo, só que separado por canal.
+perfis/
 
 # Banco: fonte de verdade em runtime, não artefato de código. Os arquivos
 # -wal/-shm são do WAL mode e mudam a cada escrita.

@@ -15,6 +15,7 @@ no ambiente; os testes apontam para um arquivo temporário.
 """
 import json
 import logging
+import os
 import sqlite3
 from contextlib import contextmanager
 
@@ -107,6 +108,10 @@ def conectar(caminho=None):
     transaction within a transaction".
     """
     caminho = caminho or settings.DB_PATH
+    pasta = os.path.dirname(os.path.abspath(caminho))
+    # A pasta do perfil nasce aqui: o sqlite3 não a cria, e o erro que ele dá
+    # ("unable to open database file") não diz que o problema é diretório.
+    os.makedirs(pasta, exist_ok=True)
     conn = sqlite3.connect(caminho, isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")

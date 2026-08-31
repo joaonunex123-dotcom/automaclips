@@ -19,6 +19,19 @@ from db import repositorio
 AGORA = datetime(2026, 8, 10, 12, 0, 0, tzinfo=timezone.utc)
 
 
+@pytest.fixture(autouse=True)
+def sem_parada_global(monkeypatch, tmp_path):
+    """A parada de emergência da RAIZ não pode depender desta máquina.
+
+    Ela é checada em toda publicação e vale para todos os perfis, então um
+    PARAR_PUBLICACAO esquecido na raiz do repositório reprovaria a suíte
+    inteira — com uma falha que não tem nada a ver com o código. Quem testa a
+    parada global sobrescreve este caminho.
+    """
+    monkeypatch.setattr(settings, "ARQUIVO_PARAR_PUBLICACAO_GLOBAL",
+                        str(tmp_path / "sem_parada_na_raiz"))
+
+
 @pytest.fixture
 def conn(tmp_path, monkeypatch):
     """Conexão a um clips.db descartável, com o schema já aplicado."""

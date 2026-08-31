@@ -206,3 +206,37 @@ def test_tiktok_fora_das_plataformas_nao_e_verificado(conn, monkeypatch,
                                                       pronto):
     monkeypatch.setattr(settings, "TIKTOK_ACCESS_TOKEN", "")
     assert preflight.verificar(conn, plataformas=["youtube", "instagram"]) == []
+
+
+# --- parada de emergência com vários canais -----------------------------------
+
+def test_parada_do_perfil_bloqueia_so_o_perfil(conn, monkeypatch, tmp_path,
+                                               pronto):
+    parada = tmp_path / "PARAR_PUBLICACAO"
+    parada.write_text("", encoding="utf-8")
+    monkeypatch.setattr(settings, "ARQUIVO_PARAR_PUBLICACAO", str(parada))
+    assert preflight.parada_de_emergencia_ativa()
+
+
+def test_parada_da_raiz_para_todos_os_canais(conn, monkeypatch, tmp_path,
+                                             pronto):
+    # Quem cria o arquivo no meio de um incidente quer que TUDO pare, não que
+    # pare o canal cujo nome ele lembrou de digitar.
+    global_ = tmp_path / "PARAR_PUBLICACAO_RAIZ"
+    global_.write_text("", encoding="utf-8")
+    monkeypatch.setattr(settings, "ARQUIVO_PARAR_PUBLICACAO",
+                        str(tmp_path / "do_perfil_que_nao_existe"))
+    monkeypatch.setattr(settings, "ARQUIVO_PARAR_PUBLICACAO_GLOBAL", str(global_))
+
+    assert preflight.parada_de_emergencia_ativa()
+    problemas = preflight.verificar(conn, plataformas=["youtube"])
+    assert "parada de emergência" in problemas[0]["mensagem"]
+
+
+def test_sem_nenhum_dos_dois_arquivos_nao_ha_parada(conn, monkeypatch,
+                                                    tmp_path, pronto):
+    monkeypatch.setattr(settings, "ARQUIVO_PARAR_PUBLICACAO",
+                        str(tmp_path / "nao_existe"))
+    monkeypatch.setattr(settings, "ARQUIVO_PARAR_PUBLICACAO_GLOBAL",
+                        str(tmp_path / "tambem_nao"))
+    assert not preflight.parada_de_emergencia_ativa()

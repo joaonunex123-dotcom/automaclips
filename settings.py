@@ -16,17 +16,95 @@ número certo depende do tamanho dos canais monitorados. A etapa 7
 observados.
 """
 import os
+import re
 
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-try:
-    from dotenv import load_dotenv
+# --- perfil: um canal de destino por perfil -----------------------------------
+#
+# Vazio = a instalação de sempre, byte a byte: um canal, o banco e a mídia na
+# raiz do projeto. Com CLIPS_PERFIL=esportes, tudo que é DADO daquele canal
+# passa a viver em perfis/esportes/, e a configuração sai de .env.esportes.
+#
+# A separação é por construção e não por disciplina: se ela dependesse de o
+# humano lembrar de sobrescrever seis variáveis no .env de cada canal, o
+# primeiro esquecimento publicaria o clip de um canal na conta do outro — e
+# isso não tem desfazer.
+#
+# O perfil é lido do AMBIENTE e não de argumento de linha de comando porque
+# este arquivo é importado no topo de todos os módulos: quando o argparse de
+# qualquer CLI roda, os caminhos já teriam sido resolvidos. Quem troca de
+# perfil é o processo inteiro (ver orchestrator/perfis.py).
+_NOME_DE_PERFIL = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
+
+def nome_de_perfil(bruto):
+    """Valida o nome do perfil. Vazio quando não há perfil nenhum.
+
+    Nome torto é RECUSADO em vez de sanitizado: ele vira nome de pasta e
+    sufixo de arquivo, então um 'CLIPS_PERFIL=../..' apontaria o banco e a
+    pasta de render para fora do projeto. Sanitizar em silêncio esconderia o
+    engano de quem digitou errado, e o sintoma apareceria como um canal
+    publicando com o banco do outro.
+    """
+    nome = (bruto or "").strip().lower()
+    if not nome:
+        return ""
+    if not _NOME_DE_PERFIL.match(nome):
+        raise ValueError(
+            f"nome de perfil inválido: {bruto!r}. Use letras minúsculas, "
+            f"números, '-' e '_' (o nome vira pasta e nome de arquivo)."
+        )
+    return nome
+
+
+PERFIL = nome_de_perfil(os.getenv("CLIPS_PERFIL"))
+
+
+def _carregar_env():
+    """Carrega .env.<perfil> e, por baixo dele, o .env comum.
+
+    Nesta ordem porque o load_dotenv NÃO sobrescreve o que já está definido:
+    o primeiro a falar vence. A precedência que sai daí é a que se espera —
+    shell > .env.<perfil> > .env —, e o .env comum vira o lugar das chaves que
+    não mudam entre canais (a do OpenRouter, a da API do YouTube), em vez de
+    serem copiadas em cada arquivo de perfil.
+    """
+    try:
+        from dotenv import load_dotenv
+    except ImportError:  # pragma: no cover - ambiente sem python-dotenv
+        # Não é fatal: quem exporta as variáveis no shell continua
+        # funcionando, e a suíte de testes nunca depende do .env.
+        return
+    if PERFIL:
+        load_dotenv(os.path.join(_BASE_DIR, f".env.{PERFIL}"))
     load_dotenv(os.path.join(_BASE_DIR, ".env"))
-except ImportError:  # pragma: no cover - ambiente sem python-dotenv
-    # Não é fatal: quem exporta as variáveis no shell continua funcionando, e
-    # a suíte de testes nunca depende do .env.
-    pass
+
+
+_carregar_env()
+
+
+def raiz_de_dados(perfil=None, base_dir=None):
+    """Onde vivem banco, mídia e credenciais DESTE canal.
+
+    Sem perfil é a raiz do projeto, que é a instalação de sempre. Com perfil é
+    perfis/<nome>/, e nenhum canal enxerga o banco, o render nem o token do
+    outro.
+    """
+    base_dir = base_dir or _BASE_DIR
+    perfil = PERFIL if perfil is None else perfil
+    return os.path.join(base_dir, "perfis", perfil) if perfil else base_dir
+
+
+DADOS_DIR = raiz_de_dados()
+
+
+def _dado(nome, sem_perfil=None):
+    """Caminho de dado: dentro do perfil quando há um; no lugar de sempre
+    quando não há."""
+    if PERFIL:
+        return os.path.join(DADOS_DIR, nome)
+    return sem_perfil or os.path.join(_BASE_DIR, nome)
 
 
 def _int(nome, padrao):
@@ -122,7 +200,12 @@ AUTO_PUBLISH = _bool("AUTO_PUBLISH", False)
 # publicacao na hora, sem precisar editar .env nem parar processo. Checado
 # ANTES de qualquer outra coisa, inclusive antes do AUTO_PUBLISH: emergencia
 # nao negocia com configuracao. Nao versionado (ver .gitignore).
-ARQUIVO_PARAR_PUBLICACAO = os.path.join(_BASE_DIR, "PARAR_PUBLICACAO")
+ARQUIVO_PARAR_PUBLICACAO = _dado("PARAR_PUBLICACAO")
+# O da RAIZ para todos os canais de uma vez. Com vários perfis rodando, um
+# freio que só alcança um deles não é freio de emergência: quem cria o arquivo
+# no meio de um incidente quer que TUDO pare, não que pare o canal cujo nome
+# ele lembrou de digitar. Sem perfil, os dois caminhos são o mesmo arquivo.
+ARQUIVO_PARAR_PUBLICACAO_GLOBAL = os.path.join(_BASE_DIR, "PARAR_PUBLICACAO")
 
 # 2) Teto absoluto por dia e por plataforma, independente do scheduler. O
 # scheduler ja limita pelos horarios, mas ele confia na propria agenda; se um
@@ -216,9 +299,12 @@ CALIBRACAO_LICOES = "licoes_do_historico"
 
 # --- caminhos -----------------------------------------------------------------
 
-DB_PATH = _caminho("CLIPS_DB_PATH", os.path.join(_BASE_DIR, "clips.db"))
+DB_PATH = _caminho("CLIPS_DB_PATH", _dado("clips.db"))
 SCHEMA_PATH = os.path.join(_BASE_DIR, "db", "schema.sql")
-CANAIS_PATH = _caminho("CANAIS_PATH", os.path.join(_BASE_DIR, "sourcing", "canais.json"))
+CANAIS_PATH = _caminho(
+    "CANAIS_PATH",
+    _dado("canais.json", os.path.join(_BASE_DIR, "sourcing", "canais.json")),
+)
 
 # --- sourcing -----------------------------------------------------------------
 
@@ -254,9 +340,11 @@ DURACAO_MAXIMA_S = _int("SOURCING_DURACAO_MAXIMA_S", 14400)
 #
 # Fora do git (ver .gitignore): são gigabytes, e tudo aqui é reconstruível a
 # partir da fila.
-DOWNLOADS_DIR = _caminho("CLIPS_DOWNLOADS_DIR", os.path.join(_BASE_DIR, "downloads"))
+DOWNLOADS_DIR = _caminho("CLIPS_DOWNLOADS_DIR", _dado("downloads"))
+# Derivada do DOWNLOADS_DIR e não da raiz: mover a pasta de downloads sem
+# mover as transcrições junto deixaria os .json órfãos do vídeo que os gerou.
 TRANSCRICOES_DIR = _caminho(
-    "CLIPS_TRANSCRICOES_DIR", os.path.join(_BASE_DIR, "downloads", "transcricoes")
+    "CLIPS_TRANSCRICOES_DIR", os.path.join(DOWNLOADS_DIR, "transcricoes")
 )
 
 # --- pipeline: download -------------------------------------------------------
@@ -493,7 +581,7 @@ DENSIDADE_PICOS_PLENA = _float("DENSIDADE_PICOS_PLENA", 4.0)
 TEMPLATE_CONFIG_PATH = _caminho(
     "TEMPLATE_CONFIG_PATH", os.path.join(_BASE_DIR, "editing", "template_config.json")
 )
-RENDER_DIR = _caminho("CLIPS_RENDER_DIR", os.path.join(_BASE_DIR, "render"))
+RENDER_DIR = _caminho("CLIPS_RENDER_DIR", _dado("render"))
 
 # Clips renderizados por execução. Render é a etapa mais cara em tempo de CPU
 # do pipeline inteiro; o teto existe para a execução ter fim previsível.
@@ -566,11 +654,14 @@ QUOTA_FUSO = _caminho("QUOTA_FUSO", "America/Los_Angeles")
 #
 # Upload exige OAuth, não a chave de API que o sourcing usa: são credenciais
 # diferentes, do mesmo projeto do Google Cloud.
+# O client secret é do PROJETO do Google Cloud e serve a todos os canais, então
+# fica na raiz mesmo com perfis. O token é a autorização DAQUELE canal e vai
+# para dentro do perfil — trocá-los de lugar publicaria no canal errado.
 YOUTUBE_CLIENT_SECRETS = _caminho(
     "YOUTUBE_CLIENT_SECRETS", os.path.join(_BASE_DIR, "client_secrets.json")
 )
 YOUTUBE_OAUTH_TOKEN = _caminho(
-    "YOUTUBE_OAUTH_TOKEN", os.path.join(_BASE_DIR, "youtube_token.json")
+    "YOUTUBE_OAUTH_TOKEN", _dado("youtube_token.json")
 )
 # 22 = People & Blogs. 'private' até você conferir os primeiros clips; troque
 # para 'public' quando confiar na fila.

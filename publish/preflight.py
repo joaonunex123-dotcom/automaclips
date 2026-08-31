@@ -39,8 +39,19 @@ def _item(nivel, plataforma, mensagem, como_resolver=""):
 
 
 def parada_de_emergencia_ativa(caminho=None):
-    """Se o arquivo de freio existe. Checado antes de tudo, sempre."""
-    return os.path.exists(caminho or settings.ARQUIVO_PARAR_PUBLICACAO)
+    """Se algum arquivo de freio existe. Checado antes de tudo, sempre.
+
+    São dois quando há perfis: o do canal e o da raiz, que para todos. Quem
+    cria o arquivo no meio de um incidente quer que TUDO pare, não que pare o
+    canal cujo nome ele lembrou de digitar. Sem perfil os dois são o mesmo
+    arquivo, e a checagem é a de sempre.
+    """
+    if caminho is not None:
+        return os.path.exists(caminho)
+    return any(os.path.exists(c) for c in (
+        settings.ARQUIVO_PARAR_PUBLICACAO,
+        settings.ARQUIVO_PARAR_PUBLICACAO_GLOBAL,
+    ))
 
 
 def _checar_metadata():
