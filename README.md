@@ -412,9 +412,13 @@ Três decisões que valem explicação:
   `youtube_token.json`, que é a autorização de um canal específico, vai para
   dentro do perfil. Para autorizar cada um:
 
-  ```bash
-  CLIPS_PERFIL=esportes python -m publish.publicar --autorizar
+  ```powershell
+  $env:CLIPS_PERFIL = "esportes"; python -m publish.publicar --autorizar
   ```
+
+  No bash, `CLIPS_PERFIL=esportes python -m publish.publicar --autorizar`. O
+  navegador abre na conta que estiver logada — confira que é a do canal certo
+  antes de autorizar, porque é essa autorização que vai para dentro do perfil.
 
 **A quota do YouTube não se multiplica com os canais.** O teto de 10.000
 unidades por dia é do PROJETO do Google Cloud: com três canais no mesmo
