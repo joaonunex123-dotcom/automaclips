@@ -4,6 +4,9 @@ Pipeline automatizado de clips verticais: descobre vídeos em alta nos canais
 monitorados, recorta os melhores trechos, edita com legenda e SFX, publica e
 recalibra a seleção com base no que performou.
 
+Estado, configuração desta máquina e o que falta para ligar:
+**[HANDOFF.md](HANDOFF.md)**.
+
 Estado: **as 7 etapas entregues**, rodando sozinho no relógio e recalibrando
 a seleção com o que performou. Publica em YouTube Shorts, Instagram Reels e
 TikTok — o mesmo arquivo nos três, com o texto de cada um. A publicação real
