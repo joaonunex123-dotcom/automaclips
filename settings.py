@@ -444,6 +444,15 @@ YOUTUBE_LEGENDAS_IDIOMAS = _lista(
 # Padrao 'auto' porque o destaque e o que o template promete.
 YOUTUBE_LEGENDAS_PREFERIR = _caminho("YOUTUBE_LEGENDAS_PREFERIR", "auto")
 
+# Esperas (s) entre tentativas quando o YouTube responde 429 à legenda. Esgotadas
+# elas, o processar cai para o Whisper API (se houver chave e orçamento).
+YOUTUBE_429_ESPERAS_S = [float(x) for x in _lista(
+    "YOUTUBE_429_ESPERAS_S", ["20", "60", "180"])]
+# Cai para a Whisper API quando a legenda do YouTube não sai (429 esgotado ou
+# vídeo sem legenda). Passa pela guarda de ORCAMENTO_USD como qualquer chamada.
+YOUTUBE_FALLBACK_API = _caminho("YOUTUBE_FALLBACK_API", "1").lower() not in (
+    "0", "false", "nao", "não", "")
+
 # --- orçamento da API paga ----------------------------------------------------
 #
 # Preço publicado do whisper-1, em USD por minuto de áudio. CONFERIR contra a

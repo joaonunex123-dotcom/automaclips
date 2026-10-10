@@ -3,7 +3,7 @@ import pytest
 
 import settings
 from db import repositorio
-from pipeline import processar
+from pipeline import legendas_youtube, processar
 
 
 @pytest.fixture
@@ -226,6 +226,66 @@ def test_teto_zero_desliga_a_guarda(conn, enfileirar, injecoes, monkeypatch):
 
     contagem = processar.processar_fila(conn, **duplos)
     assert contagem == {repositorio.STATUS_ANALISADO: 1}
+
+
+# --- fallback da legenda do YouTube para a Whisper API -------------------------
+
+def _youtube_falha_e_api_responde(estado, transcricao):
+    def transcrever(audio_path, video_id, duracao_s=0.0, backend=None):
+        estado["transcreveu"].append((video_id, backend))
+        if backend is None:
+            raise legendas_youtube.ErroLegendasYoutube("YouTube respondeu 429")
+        return (f"/tmp/{video_id}.json",
+                transcricao((10.0, 14.0, "boa noite"), (100.0, 145.0, "a virada")))
+    return transcrever
+
+
+def test_429_do_youtube_cai_para_a_api_e_registra_custo(
+        conn, enfileirar, injecoes, transcricao, monkeypatch):
+    estado, duplos = injecoes
+    monkeypatch.setattr(settings, "TRANSCRICAO_BACKEND", "youtube")
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "sk-teste")
+    monkeypatch.setattr(settings, "ORCAMENTO_USD", 10.0)
+    monkeypatch.setattr(settings, "WHISPER_API_USD_POR_MINUTO", 0.006)
+    duplos["transcrever"] = _youtube_falha_e_api_responde(estado, transcricao)
+    enfileirar()
+
+    contagem = processar.processar_fila(conn, **duplos)
+
+    assert contagem == {repositorio.STATUS_ANALISADO: 1}
+    assert estado["transcreveu"] == [("vid1", None), ("vid1", "openai")]
+    assert repositorio.custo_acumulado(conn) == pytest.approx(0.06)
+
+
+def test_fallback_respeita_a_guarda_de_orcamento(
+        conn, enfileirar, injecoes, transcricao, monkeypatch):
+    estado, duplos = injecoes
+    monkeypatch.setattr(settings, "TRANSCRICAO_BACKEND", "youtube")
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "sk-teste")
+    monkeypatch.setattr(settings, "ORCAMENTO_USD", 0.05)
+    monkeypatch.setattr(settings, "WHISPER_API_USD_POR_MINUTO", 0.006)
+    duplos["transcrever"] = _youtube_falha_e_api_responde(estado, transcricao)
+    enfileirar()
+
+    contagem = processar.processar_fila(conn, **duplos)
+
+    assert contagem == {repositorio.STATUS_FALHA: 1}
+    assert estado["transcreveu"] == [("vid1", None)]   # a API nunca foi chamada
+    assert "ORCAMENTO_USD" in repositorio.buscar_video(
+        conn, "youtube", "vid1")["erro"]
+
+
+def test_sem_chave_o_erro_da_legenda_sobe(conn, enfileirar, injecoes,
+                                          transcricao, monkeypatch):
+    estado, duplos = injecoes
+    monkeypatch.setattr(settings, "TRANSCRICAO_BACKEND", "youtube")
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "")
+    duplos["transcrever"] = _youtube_falha_e_api_responde(estado, transcricao)
+    enfileirar()
+
+    contagem = processar.processar_fila(conn, **duplos)
+    assert contagem == {repositorio.STATUS_FALHA: 1}
+    assert estado["transcreveu"] == [("vid1", None)]
 
 
 # --- isolamento de falha ------------------------------------------------------

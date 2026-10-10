@@ -27,6 +27,7 @@ import glob
 import logging
 import os
 import re
+import time
 
 import settings
 from pipeline import download
@@ -226,17 +227,85 @@ def _criar_ydl_padrao(opcoes):
     return YoutubeDL(opcoes)
 
 
+class _RegistroYdl:
+    """Logger do yt-dlp que guarda o texto. Falha de legenda (429 inclusive) sai
+    como AVISO, não como exceção — sem isto ela vira "vídeo sem legenda"."""
+
+    def __init__(self):
+        self.mensagens = []
+
+    def debug(self, msg, **_):
+        pass
+
+    def info(self, msg, **_):
+        pass
+
+    def warning(self, msg, **_):
+        self.mensagens.append(str(msg))
+
+    def error(self, msg, **_):
+        self.mensagens.append(str(msg))
+
+    def houve_429(self):
+        return any("429" in m or "too many requests" in m.lower()
+                   for m in self.mensagens)
+
+
+def _e_429(e):
+    t = str(e)
+    return "429" in t or "too many requests" in t.lower()
+
+
+def _buscar(video_id, opcoes, criar_ydl, destino_dir, registro, dormir):
+    """Roda o yt-dlp com espera crescente a cada 429 (settings.YOUTUBE_429_ESPERAS_S).
+
+    Devolve o lista de .vtt achados. Esgotadas as esperas, levanta
+    ErroLegendasYoutube com "429" no texto — o chamador decide o fallback.
+    """
+    url = f"https://www.youtube.com/watch?v={video_id}"
+    esperas = list(settings.YOUTUBE_429_ESPERAS_S)
+    while True:
+        registro.mensagens.clear()
+        erro = None
+        try:
+            with criar_ydl(opcoes) as ydl:
+                ydl.extract_info(url, download=True)
+        except Exception as e:
+            erro = e
+        encontrados = sorted(glob.glob(os.path.join(destino_dir, f"{video_id}*.vtt")))
+        if encontrados:
+            return encontrados
+        limitado = registro.houve_429() or (erro is not None and _e_429(erro))
+        if limitado and esperas:
+            espera = esperas.pop(0)
+            log.warning("YouTube respondeu 429 para a legenda de %s; esperando "
+                        "%ds (restam %d tentativas).", video_id, espera, len(esperas))
+            dormir(espera)
+            continue
+        if limitado:
+            raise ErroLegendasYoutube(
+                f"YouTube respondeu 429 (Too Many Requests) para a legenda de "
+                f"{video_id} e as esperas acabaram.")
+        if erro is not None:
+            raise ErroLegendasYoutube(f"yt-dlp falhou ao buscar legenda: {erro}") from erro
+        return []
+
+
 def baixar_vtt(video_id, destino_dir, idiomas=None, preferir=None,
-               criar_ydl=None):
+               criar_ydl=None, dormir=None):
     """Baixa a legenda e devolve (caminho_do_vtt, automatica?).
 
-    Sem chave de API: o yt-dlp lê a mesma página que o navegador lê.
+    Sem chave de API: o yt-dlp lê a mesma página que o navegador lê. 429 do
+    YouTube é tratado com espera crescente; esgotada ela, ErroLegendasYoutube
+    com "429" na mensagem (o processar cai para o Whisper API).
     """
     idiomas = idiomas or settings.YOUTUBE_LEGENDAS_IDIOMAS
     preferir = preferir or settings.YOUTUBE_LEGENDAS_PREFERIR
     criar_ydl = criar_ydl or _criar_ydl_padrao
+    dormir = dormir or time.sleep
     os.makedirs(destino_dir, exist_ok=True)
 
+    registro = _RegistroYdl()
     automatica = preferir != "manual"
     opcoes = {
         "skip_download": True,
@@ -246,18 +315,12 @@ def baixar_vtt(video_id, destino_dir, idiomas=None, preferir=None,
         "subtitlesformat": "vtt",
         "extractor_args": download.YTDLP_EXTRACTOR_ARGS,
         "outtmpl": os.path.join(destino_dir, "%(id)s.%(ext)s"),
+        "logger": registro,
         "quiet": True,
         "no_warnings": True,
     }
 
-    url = f"https://www.youtube.com/watch?v={video_id}"
-    try:
-        with criar_ydl(opcoes) as ydl:
-            ydl.extract_info(url, download=True)
-    except Exception as e:
-        raise ErroLegendasYoutube(f"yt-dlp falhou ao buscar legenda: {e}") from e
-
-    encontrados = sorted(glob.glob(os.path.join(destino_dir, f"{video_id}*.vtt")))
+    encontrados = _buscar(video_id, opcoes, criar_ydl, destino_dir, registro, dormir)
     if encontrados:
         return encontrados[0], automatica
 
@@ -268,13 +331,7 @@ def baixar_vtt(video_id, destino_dir, idiomas=None, preferir=None,
              "automática" if automatica else "manual", video_id, outro)
     opcoes["writesubtitles"] = automatica
     opcoes["writeautomaticsub"] = not automatica
-    try:
-        with criar_ydl(opcoes) as ydl:
-            ydl.extract_info(url, download=True)
-    except Exception as e:
-        raise ErroLegendasYoutube(f"yt-dlp falhou ao buscar legenda: {e}") from e
-
-    encontrados = sorted(glob.glob(os.path.join(destino_dir, f"{video_id}*.vtt")))
+    encontrados = _buscar(video_id, opcoes, criar_ydl, destino_dir, registro, dormir)
     if not encontrados:
         raise ErroLegendasYoutube(
             f"{video_id} não tem legenda em {idiomas}. Use "

@@ -233,6 +233,14 @@ arquivo** — o vídeo fica em `falha` com o motivo. Sem isso o modo de falha re
 é o saldo acabar no meio de uma execução noturna e metade da fila voltar com
 erro de billing. `ORCAMENTO_USD=0` desliga a guarda.
 
+**429 da legenda do YouTube.** O backend `youtube` espera e tenta de novo a cada
+429 (`YOUTUBE_429_ESPERAS_S`, padrão 20, 60, 180 s). Esgotadas as esperas, ou se
+o vídeo não tem legenda, o `processar` cai **sozinho** para a Whisper API
+(`YOUTUBE_FALLBACK_API=0` desliga) passando pela mesma guarda de
+`ORCAMENTO_USD`: se o fallback estouraria o teto, o vídeo fica em `falha` sem
+chamar a API. O custo do fallback entra na tabela `custos` como qualquer
+transcrição paga.
+
 O gasto acumulado aparece no resumo de `python -m pipeline.processar`.
 
 ## O template do clip
