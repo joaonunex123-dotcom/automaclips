@@ -113,7 +113,7 @@ def test_baixa_e_devolve_caminho_e_duracao(tmp_path, ffmpeg_falso):
     assert criados[0].opcoes["merge_output_format"] == "mp4"
     # O cliente padrão do yt-dlp falha com "The page needs to be reloaded".
     assert criados[0].opcoes["extractor_args"] == {
-        "youtube": {"player_client": ["android_vr"]}
+        "youtube": {"player_client": ["android"]}
     }
 
 
@@ -128,56 +128,24 @@ def test_falha_do_ytdlp_vira_erro_do_modulo(tmp_path, ffmpeg_falso):
         )
 
 
-def test_duas_passadas_pega_video_do_android_vr_e_audio_do_android(
-        tmp_path, ffmpeg_falso):
+def test_sem_formato_pede_o_18_pelo_cliente_android(tmp_path, ffmpeg_falso):
+    final = tmp_path / "vid1.mp4"
+    final.write_text("", encoding="utf-8")
+    info = {"id": "vid1", "duration": 5.0,
+            "requested_downloads": [{"filepath": str(final)}]}
     criados = []
 
     def criar(opcoes):
-        sufixo = "video" if "android_vr" in str(opcoes["extractor_args"]) else "audio"
-        arq = tmp_path / f"vid1.{sufixo}.mp4"
-        arq.write_text("x", encoding="utf-8")
-        info = {"id": "vid1", "duration": 99.0,
-                "requested_downloads": [{"filepath": str(arq)}]}
-        ydl = YdlFalso(opcoes, info)
-        criados.append(ydl)
-        return ydl
+        criados.append(YdlFalso(opcoes, info))
+        return criados[-1]
 
-    comandos = []
-
-    def executar(cmd, **kw):
-        comandos.append(cmd)
-        open(cmd[-1], "w", encoding="utf-8").write("x")
-        return SimpleNamespace(returncode=0, stderr="")
-
-    monkey = download._baixar_duas_passadas
-    caminho, duracao = monkey("vid1", str(tmp_path), ffmpeg_falso, criar,
-                              executar=executar)
-
-    assert caminho == str(tmp_path / "vid1.mp4")
-    assert duracao == 99.0
-    assert criados[0].opcoes["extractor_args"]["youtube"]["player_client"] == ["android_vr"]
-    assert criados[1].opcoes["extractor_args"]["youtube"]["player_client"] == ["android"]
-    assert criados[1].opcoes["format"] == "18"
-    cmd = comandos[0]
-    assert cmd[cmd.index("-map") + 1] == "0:v:0" and "1:a:0" in cmd
-    # as faixas soltas somem depois do mux
-    assert not (tmp_path / "vid1.video.mp4").exists()
-    assert not (tmp_path / "vid1.audio.mp4").exists()
-
-
-def test_baixar_video_sem_formato_usa_duas_passadas(tmp_path, ffmpeg_falso,
-                                                    monkeypatch):
-    chamado = {}
-
-    def falso(video_id, destino_dir, ffmpeg, criar_ydl, executar=None):
-        chamado["id"] = video_id
-        return "/x/vid1.mp4", 5.0
-
-    monkeypatch.setattr(download, "_baixar_duas_passadas", falso)
-    assert download.baixar_video(
-        "vid1", destino_dir=str(tmp_path), caminho_ffmpeg=ffmpeg_falso,
-    ) == ("/x/vid1.mp4", 5.0)
-    assert chamado["id"] == "vid1"
+    download.baixar_video("vid1", destino_dir=str(tmp_path), criar_ydl=criar,
+                          caminho_ffmpeg=ffmpeg_falso)
+    # android_vr corta o download em ~10 MB; o 18 do android baixa inteiro.
+    assert criados[0].opcoes["format"] == "18"
+    assert criados[0].opcoes["extractor_args"] == {
+        "youtube": {"player_client": ["android"]}
+    }
 
 
 # --- extração de áudio --------------------------------------------------------
