@@ -175,14 +175,20 @@ def _uma_chamada(cliente, prompt, model, system, expect_json, max_tokens,
 
 
 def call_llm(prompt, model, expect_json=True, fallback_model=None, system=None,
-             cliente=None, max_tokens=None, temperature=None, com_detalhes=False):
+             cliente=None, max_tokens=None, temperature=None, com_detalhes=False,
+             provedor=None):
     """Chama `model` via OpenRouter. Devolve dict (expect_json) ou str.
+
+    `provedor` ('openrouter' | 'openai') escolhe o destino só desta chamada;
+    sem ele vale LLM_PROVEDOR. É o que deixa o fallback do highlight_detect
+    falar com a OpenAI sem mexer no provedor do metadado.
 
     Com `com_detalhes=True`, devolve `(resultado, detalhes)` — onde detalhes
     traz qual modelo respondeu de fato e se o fallback entrou. É o que a etapa
     7 vai usar para comparar custo contra qualidade.
     """
-    cliente = cliente if cliente is not None else construir_cliente()
+    cliente = (cliente if cliente is not None
+               else construir_cliente(provedor=provedor))
 
     conteudo, detalhes = _uma_chamada(
         cliente, prompt, model, system, expect_json, max_tokens, temperature

@@ -11,16 +11,22 @@ from types import SimpleNamespace
 
 import pytest
 
-# O .env real da máquina (chaves, MODEL_FALLBACK, LLM_PROVEDOR...) não pode
-# entrar na suíte: ele mudava o provedor e o fallback e reprovava 5 testes que
-# nada têm a ver com o código. Tem que acontecer ANTES do primeiro
-# `import settings`, que é quem chama load_dotenv.
-import dotenv  # noqa: E402
+# O .env do desenvolvedor NÃO entra na suíte. O settings carrega o .env no
+# import (e de novo a cada reload), e com chaves e modelos reais ali — um
+# MODEL_FALLBACK=gpt-4.1, um LLM_PROVEDOR=openai — os testes passariam a
+# depender da máquina de quem roda, e pior: de chave real. Desligar o
+# load_dotenv ANTES do primeiro `import settings` faz valerem só os defaults e
+# o que o próprio teste define. Quem testa o carregamento do .env o faz com
+# monkeypatch/tmp_path, não com o arquivo da raiz.
+try:
+    import dotenv
 
-dotenv.load_dotenv = lambda *args, **kwargs: False
+    dotenv.load_dotenv = lambda *args, **kwargs: False
+except ImportError:  # pragma: no cover - ambiente sem python-dotenv
+    pass
 
 import settings  # noqa: E402
-from db import repositorio
+from db import repositorio  # noqa: E402
 
 # Instante fixo para todo cálculo de idade. Com datetime.now() os testes de
 # score ficariam sensíveis ao relógio da máquina e à duração da própria suíte.

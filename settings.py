@@ -522,6 +522,16 @@ HIGHLIGHT_PROVEDOR = _caminho("HIGHLIGHT_PROVEDOR", "anthropic")
 # a chamada volta 404 com o nome dentro, e corrigir e mexer no .env.
 MODEL_HIGHLIGHT = _caminho("MODEL_HIGHLIGHT", "gpt-4.1")
 
+# Fallback ENTRE PROVEDORES do highlight_detect. Se o provedor principal falhar
+# (erro de API, saldo, timeout, rate limit, recusa) ou devolver JSON inválido,
+# a escolha do trecho é refeita neste provedor/modelo em vez de derrubar o
+# vídeo. MODEL_HIGHLIGHT_FALLBACK vazio = sem fallback (o padrao: ligar custa
+# uma chave e um modelo que so voce pode escolher). O provedor e 'openai' ou
+# 'openrouter'. Nao confundir com MODEL_FALLBACK, logo abaixo, que e o modelo
+# da segunda tentativa DENTRO do mesmo provedor (resposta malformada).
+HIGHLIGHT_PROVEDOR_FALLBACK = _caminho("HIGHLIGHT_PROVEDOR_FALLBACK", "openai")
+MODEL_HIGHLIGHT_FALLBACK = _caminho("MODEL_HIGHLIGHT_FALLBACK", "")
+
 # Quantos caracteres de transcricao equivalem a um token, aproximadamente.
 # Usado SO no caminho openai, onde nao ha um contador de tokens do provedor a
 # mao: a guarda de custo vira estimativa em vez de medida. Conservador de

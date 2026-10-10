@@ -372,3 +372,203 @@ def test_registra_o_modelo_no_caminho_alternativo(conn, cliente_openrouter):
     linha = repositorio.geracoes(conn, repositorio.ETAPA_HIGHLIGHT)[0]
     assert linha["modelo_pedido"] == settings.MODEL_HIGHLIGHT
     assert linha["referencia"] == "vid9"
+
+
+# --- fallback entre provedores (Anthropic -> OpenAI) --------------------------
+
+class _ClienteQuebrado:
+    """Duplo do SDK da Anthropic em que toda chamada levanta `erro`."""
+
+    def __init__(self, erro):
+        self.chamadas = 0
+
+        def _levanta(**_kw):
+            self.chamadas += 1
+            raise erro
+
+        self.messages = SimpleNamespace(count_tokens=_levanta, stream=_levanta)
+        self.beta = SimpleNamespace(messages=SimpleNamespace(stream=_levanta))
+
+
+@pytest.fixture
+def fallback_ligado(monkeypatch):
+    monkeypatch.setattr(settings, "MODEL_HIGHLIGHT_FALLBACK", "gpt-fb")
+    monkeypatch.setattr(settings, "HIGHLIGHT_PROVEDOR_FALLBACK", "openai")
+    monkeypatch.setattr(settings, "HIGHLIGHT_PROVEDOR", "anthropic")
+
+
+def _json_ok(**kw):
+    return json.dumps({"trechos": [_trecho_api(**kw)]})
+
+
+def test_sucesso_no_primario_nao_toca_no_fallback(
+        conn, cliente_claude, cliente_openrouter, fallback_ligado):
+    from db import repositorio
+
+    primario = cliente_claude(trechos=[_trecho_api()])
+    reserva = cliente_openrouter([_json_ok()])
+    trechos = hd.detectar(TRANSCRICAO, cliente=primario,
+                          cliente_fallback=reserva, conn=conn, referencia="v1")
+
+    assert len(trechos) == 1
+    assert reserva.chamadas == []
+    linha = repositorio.geracoes(conn, repositorio.ETAPA_HIGHLIGHT)[0]
+    assert linha["provedor"] == "anthropic"
+    assert linha["usou_fallback"] == 0
+
+
+def test_falha_do_primario_e_sucesso_no_fallback(
+        conn, cliente_openrouter, fallback_ligado):
+    from db import repositorio
+
+    primario = _ClienteQuebrado(RuntimeError("credit balance is too low"))
+    reserva = cliente_openrouter([_json_ok()])
+    trechos = hd.detectar(TRANSCRICAO, cliente=primario,
+                          cliente_fallback=reserva, conn=conn, referencia="v1")
+
+    assert trechos[0]["inicio_s"] == 100.0
+    assert primario.chamadas == 1
+    # Formato pedido no texto: do outro lado não há saída estruturada.
+    assert reserva.chamadas[0]["model"] == "gpt-fb"
+    assert reserva.chamadas[0]["response_format"] == {"type": "json_object"}
+    # E o fallback é o último recurso: sem MODEL_FALLBACK (slug do OpenRouter)
+    # indo parar na OpenAI.
+    assert len(reserva.chamadas) == 1
+
+    linha = repositorio.geracoes(conn, repositorio.ETAPA_HIGHLIGHT)[0]
+    assert linha["provedor"] == "openai"
+    assert linha["modelo_pedido"] == "gpt-fb"
+    assert linha["usou_fallback"] == 1
+    assert linha["referencia"] == "v1"
+
+
+def test_recusa_do_primario_cai_no_fallback(
+        cliente_claude, cliente_openrouter, fallback_ligado):
+    primario = cliente_claude(stop_reason="refusal", blocos=[])
+    reserva = cliente_openrouter([_json_ok()])
+    assert len(hd.detectar(TRANSCRICAO, cliente=primario,
+                           cliente_fallback=reserva)) == 1
+
+
+def test_json_invalido_no_primario_cai_no_fallback(
+        cliente_claude, cliente_openrouter, fallback_ligado):
+    primario = cliente_claude(texto="isto não é json")
+    reserva = cliente_openrouter([_json_ok()])
+    trechos = hd.detectar(TRANSCRICAO, cliente=primario,
+                          cliente_fallback=reserva)
+
+    assert len(trechos) == 1
+    assert len(reserva.chamadas) == 1
+
+
+def test_falha_nos_dois_da_erro_claro(cliente_openrouter, fallback_ligado):
+    primario = _ClienteQuebrado(RuntimeError("timeout do primario"))
+    reserva = cliente_openrouter([RuntimeError("429 do fallback")])
+
+    with pytest.raises(hd.ErroHighlight) as e:
+        hd.detectar(TRANSCRICAO, cliente=primario, cliente_fallback=reserva)
+    mensagem = str(e.value)
+    assert "timeout do primario" in mensagem
+    assert "429 do fallback" in mensagem
+
+
+def test_falha_nos_dois_nao_perde_o_video(
+        conn, video, transcricao, cliente_openrouter, fallback_ligado):
+    # Pelo processar de verdade: o ErroHighlight vira status 'falha' com o
+    # motivo, a linha continua na fila e volta com --retentar.
+    from db import repositorio
+    from pipeline import processar
+
+    fila_id = repositorio.registrar_observacao(
+        conn, video(video_id="vidF"), views=1, ganho=1, score=1000.0,
+        status=repositorio.STATUS_DESCOBERTO,
+    )
+    primario = _ClienteQuebrado(RuntimeError("sem saldo na anthropic"))
+    reserva = cliente_openrouter([RuntimeError("rate limit na openai")])
+
+    contagem = processar.processar_fila(
+        conn,
+        baixar=lambda v: {"video_path": "/v.mp4", "audio_path": "/a.wav",
+                          "duracao_real_s": 600.0},
+        transcrever=lambda *a, **k: (
+            "/t.json", transcricao((10.0, 14.0, "boa noite"))),
+        detectar=lambda texto, **kw: hd.detectar(
+            texto, cliente=primario, cliente_fallback=reserva, **kw),
+        picos_do_audio=lambda _p: [],
+    )
+
+    assert contagem == {repositorio.STATUS_FALHA: 1}
+    linha = conn.execute(
+        "SELECT * FROM fila_clips WHERE id = ?", (fila_id,)).fetchone()
+    assert linha["status"] == repositorio.STATUS_FALHA
+    assert "sem saldo na anthropic" in linha["erro"]
+    assert "rate limit na openai" in linha["erro"]
+    assert [l["id"] for l in processar.fila_pendente(conn, retentar=True)] == [fila_id]
+
+
+def test_fallback_desligado_propaga_o_erro_do_primario(
+        cliente_openrouter, monkeypatch):
+    monkeypatch.setattr(settings, "MODEL_HIGHLIGHT_FALLBACK", "")
+    primario = _ClienteQuebrado(RuntimeError("sem saldo"))
+    reserva = cliente_openrouter([_json_ok()])
+
+    with pytest.raises(RuntimeError, match="sem saldo"):
+        hd.detectar(TRANSCRICAO, cliente=primario, cliente_fallback=reserva)
+    assert reserva.chamadas == []
+
+
+def test_fallback_desligado_e_o_padrao():
+    assert settings.MODEL_HIGHLIGHT_FALLBACK == ""
+
+
+def test_guarda_de_custo_nao_aciona_o_fallback(
+        cliente_claude, cliente_openrouter, fallback_ligado):
+    primario = cliente_claude(trechos=[], input_tokens=10**7)
+    reserva = cliente_openrouter([_json_ok()])
+    with pytest.raises(hd.TranscricaoGrande):
+        hd.detectar(TRANSCRICAO, cliente=primario, cliente_fallback=reserva,
+                    limite_tokens=1000)
+    assert reserva.chamadas == []
+
+
+def test_fallback_aponta_para_a_openai_e_nao_para_o_llm_provedor(
+        monkeypatch, fallback_ligado):
+    # LLM_PROVEDOR (metadado, recalibração) segue openrouter; o fallback do
+    # highlight escolhe o próprio destino sem alterá-lo.
+    import llm_client
+
+    monkeypatch.setattr(settings, "LLM_PROVEDOR", "openrouter")
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "sk-teste")
+    visto = {}
+
+    def construir(api_key=None, base_url=None, max_retries=None, provedor=None):
+        visto["provedor"] = provedor
+        raise llm_client.ErroLLM("sem rede neste teste")
+
+    monkeypatch.setattr(llm_client, "construir_cliente", construir)
+    with pytest.raises(hd.ErroHighlight, match="sem rede neste teste"):
+        hd.detectar(TRANSCRICAO, cliente=_ClienteQuebrado(RuntimeError("x")))
+    assert visto["provedor"] == "openai"
+    assert settings.LLM_PROVEDOR == "openrouter"
+
+
+def test_fallback_igual_ao_principal_nao_e_fallback(
+        cliente_openrouter, monkeypatch):
+    monkeypatch.setattr(settings, "HIGHLIGHT_PROVEDOR", "openai")
+    monkeypatch.setattr(settings, "MODEL_HIGHLIGHT", "gpt-x")
+    monkeypatch.setattr(settings, "MODEL_HIGHLIGHT_FALLBACK", "gpt-x")
+    monkeypatch.setattr(settings, "HIGHLIGHT_PROVEDOR_FALLBACK", "openai")
+    cliente = cliente_openrouter([RuntimeError("falhou")])
+    with pytest.raises(hd.ErroHighlight):
+        hd.detectar(TRANSCRICAO, cliente=cliente)
+    assert len(cliente.chamadas) == 1       # não refez a mesma chamada
+
+
+def test_importa_o_codigo_desta_pasta():
+    import os
+
+    import llm_client
+
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for modulo in (hd, llm_client, settings):
+        assert os.path.abspath(modulo.__file__).startswith(raiz), modulo.__file__
