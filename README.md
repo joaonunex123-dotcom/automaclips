@@ -23,9 +23,21 @@ Fora do pip, obrigatório a partir da etapa 2: **ffmpeg no PATH**. O yt-dlp o us
 para juntar as faixas de vídeo e áudio separadas do YouTube, e a extração do
 áudio de trabalho é uma chamada direta a ele.
 
+O pipeline chama o `ffmpeg` **do PATH** (`shutil.which("ffmpeg")` em
+`pipeline/download.py`; `"ffmpeg"` literal em `editing/render.py`). Não usa o
+binário do `imageio-ffmpeg`. Precisa ter **libass** — sem ele o filtro
+`subtitles`/`ass` não existe e a legenda não é queimada no render. Confira:
+
 ```bash
-winget install Gyan.FFmpeg
+ffmpeg -hide_banner -filters | grep -E " (subtitles|ass) "
 ```
+
+Caminho único documentado:
+
+- **macOS (esta máquina):** build estático arm64 do martin-riedl.de, em
+  `~/ffmpeg-bin/ffmpeg`, com `export PATH="$HOME/ffmpeg-bin:$PATH"` no
+  `~/.zshrc`. Não use o do Homebrew nem o do `imageio-ffmpeg`.
+- **Windows:** `winget install Gyan.FFmpeg` (já vem com libass).
 
 Configuração, nesta ordem:
 
