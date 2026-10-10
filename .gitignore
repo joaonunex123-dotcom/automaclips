@@ -68,3 +68,7 @@ Thumbs.db
 
 # Backups do banco feitos à mão (clips.db.bak, clips.db.pre-limpeza, e seus -wal/-shm).
 clips.db*
+
+# Provedor de PO token (bgutil): node + servidor + venv do yt-dlp novo. Reconstruível (README).
+.pot/
+.venv313/
