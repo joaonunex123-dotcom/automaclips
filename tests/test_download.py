@@ -104,7 +104,7 @@ def test_baixa_e_devolve_caminho_e_duracao(tmp_path, ffmpeg_falso):
 
     caminho, duracao = download.baixar_video(
         "vid1", destino_dir=str(tmp_path), criar_ydl=criar,
-        caminho_ffmpeg=ffmpeg_falso, formato="best",
+        caminho_ffmpeg=ffmpeg_falso, pot_ativo=False,
     )
     assert caminho == str(final)
     assert duracao == 1234.0
@@ -124,11 +124,11 @@ def test_falha_do_ytdlp_vira_erro_do_modulo(tmp_path, ffmpeg_falso):
     with pytest.raises(download.ErroDownload, match="vídeo privado"):
         download.baixar_video(
             "vid1", destino_dir=str(tmp_path), criar_ydl=criar,
-            caminho_ffmpeg=ffmpeg_falso, formato="best",
+            caminho_ffmpeg=ffmpeg_falso, pot_ativo=False,
         )
 
 
-def test_sem_formato_pede_o_18_pelo_cliente_android(tmp_path, ffmpeg_falso):
+def test_sem_pot_pede_o_18_pelo_cliente_android(tmp_path, ffmpeg_falso):
     final = tmp_path / "vid1.mp4"
     final.write_text("", encoding="utf-8")
     info = {"id": "vid1", "duration": 5.0,
@@ -140,12 +140,68 @@ def test_sem_formato_pede_o_18_pelo_cliente_android(tmp_path, ffmpeg_falso):
         return criados[-1]
 
     download.baixar_video("vid1", destino_dir=str(tmp_path), criar_ydl=criar,
-                          caminho_ffmpeg=ffmpeg_falso)
+                          caminho_ffmpeg=ffmpeg_falso, pot_ativo=False)
     # android_vr corta o download em ~10 MB; o 18 do android baixa inteiro.
     assert criados[0].opcoes["format"] == "18"
     assert criados[0].opcoes["extractor_args"] == {
         "youtube": {"player_client": ["android"]}
     }
+
+
+def _info_de(tmp_path, altura):
+    final = tmp_path / "vid1.mp4"
+    final.write_text("", encoding="utf-8")
+    return {"id": "vid1", "duration": 5.0, "height": altura,
+            "requested_downloads": [{"filepath": str(final)}]}
+
+
+def test_com_pot_no_ar_pede_hd_pelo_cliente_padrao(tmp_path, ffmpeg_falso):
+    criados = []
+
+    def criar(opcoes):
+        criados.append(YdlFalso(opcoes, _info_de(tmp_path, 1080)))
+        return criados[-1]
+
+    download.baixar_video("vid1", destino_dir=str(tmp_path), criar_ydl=criar,
+                          caminho_ffmpeg=ffmpeg_falso, pot_ativo=True)
+    assert len(criados) == 1
+    assert "1080" in criados[0].opcoes["format"]
+    # sem player_client fixo: o cliente web + PO token é o que entrega o HD.
+    assert "youtube" not in criados[0].opcoes["extractor_args"]
+    assert "youtubepot-bgutilhttp" in criados[0].opcoes["extractor_args"]
+    assert download.ultimo_download["altura"] == 1080
+
+
+def test_hd_que_falha_cai_para_360p(tmp_path, ffmpeg_falso):
+    criados = []
+
+    def criar(opcoes):
+        if len(criados) == 0:
+            criados.append(YdlFalso(opcoes, erro=RuntimeError("403")))
+        else:
+            criados.append(YdlFalso(opcoes, _info_de(tmp_path, 360)))
+        return criados[-1]
+
+    caminho, _ = download.baixar_video(
+        "vid1", destino_dir=str(tmp_path), criar_ydl=criar,
+        caminho_ffmpeg=ffmpeg_falso, pot_ativo=True)
+    assert len(criados) == 2
+    assert criados[1].opcoes["format"] == "18"
+    assert download.ultimo_download["altura"] == 360
+    assert download.ultimo_download["tentativa"] == "360p"
+
+
+def test_pot_fora_do_ar_nao_tenta_hd(tmp_path, ffmpeg_falso, monkeypatch):
+    monkeypatch.setattr(download, "pot_no_ar", lambda *a, **k: False)
+    criados = []
+
+    def criar(opcoes):
+        criados.append(YdlFalso(opcoes, _info_de(tmp_path, 360)))
+        return criados[-1]
+
+    download.baixar_video("vid1", destino_dir=str(tmp_path), criar_ydl=criar,
+                          caminho_ffmpeg=ffmpeg_falso)
+    assert len(criados) == 1 and criados[0].opcoes["format"] == "18"
 
 
 # --- extração de áudio --------------------------------------------------------

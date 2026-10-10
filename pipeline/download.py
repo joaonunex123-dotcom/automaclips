@@ -23,20 +23,21 @@ import settings
 log = logging.getLogger(__name__)
 
 
-# O cliente padrão do yt-dlp (tv/web) falha hoje com "The page needs to be
-# reloaded" para qualquer vídeo. Medido em 10/10/2026, sem PO token:
+# Dois caminhos de download, medidos em 10/10/2026 (vídeo 42, 1h50):
 #
-# * android_vr lista 1080p e abre as legendas, mas o googlevideo corta o
-#   download com 403 em ~10 MB (qualquer formato, qualquer chunk) e nega o
-#   áudio;
-# * android só oferece o formato 18 (360p COM áudio) — e esse baixa inteiro.
+# * HD (1080p). Exige yt-dlp >= 2026.08 (Python >= 3.10) com o plugin
+#   bgutil-ytdlp-pot-provider, o servidor de PO token no ar (ops/pot_provider.sh)
+#   e um runtime JS (node). Sem PO token o cliente web só devolve imagens, e o
+#   android_vr corta o googlevideo com 403 em ~10 MB.
+# * 360p (fallback). Cliente android, formato 18 (360p COM áudio): o único que
+#   baixa inteiro sem PO token. Usado quando o servidor está fora do ar ou o
+#   HD falha — o clip sai pior, mas sai.
 #
-# Então o vídeo vem do android, em 360p; o android_vr fica só nas legendas
-# (YTDLP_EXTRACTOR_ARGS, compartilhado com legendas_youtube). Subir a
-# resolução depende de um provedor de PO token (bgutil) — ver to_do.
+# O android_vr fica só nas legendas (YTDLP_EXTRACTOR_ARGS, compartilhado com
+# legendas_youtube).
 YTDLP_EXTRACTOR_ARGS = {"youtube": {"player_client": ["android_vr"]}}
-_ARGS_VIDEO = {"youtube": {"player_client": ["android"]}}
-_FORMATO_VIDEO = "18"
+_ARGS_360P = {"youtube": {"player_client": ["android"]}}
+_FORMATO_360P = "18"
 
 
 class ErroDownload(Exception):
@@ -88,48 +89,103 @@ def _criar_ydl_padrao(opcoes):
     return YoutubeDL(opcoes)
 
 
+def pot_no_ar(url=None, timeout=2.0):
+    """O servidor de PO token responde? Barato (um GET) e evita gastar um
+    extract_info inteiro só para descobrir que o HD não vai sair."""
+    import urllib.request
+
+    url = (url or settings.POT_URL).rstrip("/") + "/ping"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
+def _opcoes_hd():
+    extra = {"youtubepot-bgutilhttp": {"base_url": [settings.POT_URL]}}
+    opcoes = {"extractor_args": extra}
+    if settings.YTDLP_JS_RUNTIME:
+        opcoes["js_runtimes"] = {"node": {"path": settings.YTDLP_JS_RUNTIME}}
+    else:
+        opcoes["js_runtimes"] = {"node": {}}
+    return opcoes
+
+
 def baixar_video(video_id, destino_dir=None, formato=None, criar_ydl=None,
-                 caminho_ffmpeg=None):
+                 caminho_ffmpeg=None, pot_ativo=None):
     """Baixa o vídeo e devolve (caminho, duração_em_segundos).
 
-    Idempotente por arquivo: o yt-dlp pula o download se o destino já existe,
-    então retomar um vídeo que falhou na transcrição não rebaixa o vídeo.
+    Tenta 1080p (settings.YTDLP_FORMATO) quando o servidor de PO token está no
+    ar e cai para 360p (formato 18) se ele estiver fora ou o HD falhar. A altura
+    realmente obtida fica em `ultimo_download["altura"]` e no log.
 
-    Sem `formato` pede o 18 (360p), o único que o YouTube entrega inteiro hoje;
-    o settings.YTDLP_FORMATO (1080p) não entra porque dá 403 — ver acima.
+    Idempotente por arquivo: o yt-dlp pula o download se o destino já existe,
+    então retomar um vídeo que falhou na transcrição não rebaixa o vídeo. Um
+    360p já em disco NÃO é trocado por HD sozinho: apague o .mp4 para refazer.
     """
     destino_dir = destino_dir or settings.DOWNLOADS_DIR
     os.makedirs(destino_dir, exist_ok=True)
     ffmpeg = _garantir_ffmpeg(caminho_ffmpeg)
     criar_ydl = criar_ydl or _criar_ydl_padrao
 
-    opcoes = {
-        "format": formato or _FORMATO_VIDEO,
+    base = {
         "outtmpl": os.path.join(destino_dir, "%(id)s.%(ext)s"),
         # mp4 para a etapa 3 não precisar adivinhar o container na hora de
         # cortar.
         "merge_output_format": "mp4",
-        "extractor_args": _ARGS_VIDEO,
         "ffmpeg_location": os.path.dirname(ffmpeg) or None,
         "quiet": True,
         "noprogress": True,
         "no_warnings": True,
     }
-
     url = f"https://www.youtube.com/watch?v={video_id}"
-    try:
-        ydl = criar_ydl(opcoes)
-        with ydl:
-            info = ydl.extract_info(url, download=True)
-    except ErroDownload:
-        raise
-    except Exception as e:
-        raise ErroDownload(f"yt-dlp falhou em {video_id}: {e}") from e
 
-    caminho = _caminho_baixado(info, ydl)
-    duracao = float(info.get("duration") or 0)
-    log.info("Baixado %s (%.0fs) em %s", video_id, duracao, caminho)
-    return caminho, duracao
+    tentativas = []
+    hd_possivel = pot_no_ar() if pot_ativo is None else pot_ativo
+    if hd_possivel:
+        tentativas.append(("1080p", {
+            **base, "format": formato or settings.YTDLP_FORMATO, **_opcoes_hd(),
+        }))
+    else:
+        log.warning("Servidor de PO token fora do ar (%s): baixando em 360p. "
+                    "Suba com ops/pot_provider.sh subir.", settings.POT_URL)
+    tentativas.append(("360p", {
+        **base, "format": _FORMATO_360P, "extractor_args": _ARGS_360P,
+    }))
+
+    ultimo_erro = None
+    for rotulo, opcoes in tentativas:
+        try:
+            ydl = criar_ydl(opcoes)
+            with ydl:
+                info = ydl.extract_info(url, download=True)
+            caminho = _caminho_baixado(info, ydl)
+        except ErroDownload as e:
+            ultimo_erro = e
+        except Exception as e:
+            ultimo_erro = ErroDownload(f"yt-dlp falhou em {video_id}: {e}")
+        else:
+            duracao = float(info.get("duration") or 0)
+            altura = info.get("height") or max(
+                [d.get("height") or 0 for d in info.get("requested_downloads") or []]
+                or [0]
+            )
+            largura = info.get("width") or 0
+            ultimo_download.update(altura=altura, largura=largura,
+                                   tentativa=rotulo)
+            log.info("Baixado %s (%.0fs, %sx%s) em %s", video_id, duracao,
+                     largura or "?", altura or "?", caminho)
+            return caminho, duracao
+        if rotulo != tentativas[-1][0]:
+            log.warning("Download %s falhou (%s); caindo para 360p.", rotulo,
+                        ultimo_erro)
+    raise ultimo_erro
+
+
+# Resultado do último download (altura e qual tentativa valeu), para a CLI e os
+# testes mostrarem a resolução obtida sem mudar o retorno de baixar_video.
+ultimo_download = {}
 
 
 def extrair_audio(video_path, destino_dir=None, sample_rate=None,

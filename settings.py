@@ -356,6 +356,13 @@ YTDLP_FORMATO = _caminho(
     "YTDLP_FORMATO", "bestvideo[height<=1080]+bestaudio/best[height<=1080]"
 )
 
+# Servidor de PO token (bgutil), necessário para o 1080p. Sem ele o download
+# cai para 360p (pipeline/download.py). Subir/parar: ops/pot_provider.sh.
+POT_URL = _caminho("POT_PROVIDER_URL", "http://127.0.0.1:4416")
+# Caminho do node para o yt-dlp resolver o desafio JS do YouTube. Vazio = o
+# que estiver no PATH.
+YTDLP_JS_RUNTIME = _caminho("YTDLP_JS_RUNTIME", "")
+
 # Áudio extraído para transcrição e análise de energia. 16 kHz mono é o que o
 # Whisper consome internamente — entregar já nesse formato evita uma
 # reamostragem por execução, e serve igualmente bem ao librosa.
