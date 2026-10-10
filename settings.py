@@ -356,6 +356,13 @@ YTDLP_FORMATO = _caminho(
     "YTDLP_FORMATO", "bestvideo[height<=1080]+bestaudio/best[height<=1080]"
 )
 
+# Servidor de PO token (bgutil), necessário para o 1080p. Sem ele o download
+# cai para 360p (pipeline/download.py). Subir/parar: ops/pot_provider.sh.
+POT_URL = _caminho("POT_PROVIDER_URL", "http://127.0.0.1:4416")
+# Caminho do node para o yt-dlp resolver o desafio JS do YouTube. Vazio = o
+# que estiver no PATH.
+YTDLP_JS_RUNTIME = _caminho("YTDLP_JS_RUNTIME", "")
+
 # Áudio extraído para transcrição e análise de energia. 16 kHz mono é o que o
 # Whisper consome internamente — entregar já nesse formato evita uma
 # reamostragem por execução, e serve igualmente bem ao librosa.
@@ -436,6 +443,15 @@ YOUTUBE_LEGENDAS_IDIOMAS = _lista(
 #
 # Padrao 'auto' porque o destaque e o que o template promete.
 YOUTUBE_LEGENDAS_PREFERIR = _caminho("YOUTUBE_LEGENDAS_PREFERIR", "auto")
+
+# Esperas (s) entre tentativas quando o YouTube responde 429 à legenda. Esgotadas
+# elas, o processar cai para o Whisper API (se houver chave e orçamento).
+YOUTUBE_429_ESPERAS_S = [float(x) for x in _lista(
+    "YOUTUBE_429_ESPERAS_S", ["20", "60", "180"])]
+# Cai para a Whisper API quando a legenda do YouTube não sai (429 esgotado ou
+# vídeo sem legenda). Passa pela guarda de ORCAMENTO_USD como qualquer chamada.
+YOUTUBE_FALLBACK_API = _caminho("YOUTUBE_FALLBACK_API", "1").lower() not in (
+    "0", "false", "nao", "não", "")
 
 # --- orçamento da API paga ----------------------------------------------------
 #

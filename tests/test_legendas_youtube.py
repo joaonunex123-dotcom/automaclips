@@ -283,6 +283,54 @@ def test_video_sem_legenda_nenhuma_diz_o_que_fazer(tmp_path):
                       criar_ydl=lambda opcoes: YdlFalso(opcoes))
 
 
+# --- 429 do YouTube -----------------------------------------------------------
+
+def _ydl_que_da_429(tmp_path, quantas, avisar_so_no_logger):
+    """Falha `quantas` vezes com 429 e depois escreve o .vtt."""
+    estado = {"chamadas": 0}
+
+    class Ydl(YdlFalso):
+        def extract_info(self, url, download=True):
+            estado["chamadas"] += 1
+            if estado["chamadas"] <= quantas:
+                if avisar_so_no_logger:
+                    # yt-dlp real: falha de legenda é AVISO, não exceção.
+                    self.opcoes["logger"].warning(
+                        "Unable to download video subtitles for 'pt': HTTP Error 429")
+                    return {}
+                raise RuntimeError("HTTP Error 429: Too Many Requests")
+            (tmp_path / "abc.pt-BR.vtt").write_text(AUTO, encoding="utf-8")
+            return {}
+
+    return estado, Ydl
+
+
+@pytest.mark.parametrize("so_logger", [False, True])
+def test_429_espera_e_tenta_de_novo(tmp_path, monkeypatch, so_logger):
+    monkeypatch.setattr(settings, "YOUTUBE_429_ESPERAS_S", [5.0, 15.0, 45.0])
+    estado, Ydl = _ydl_que_da_429(tmp_path, 2, so_logger)
+    dormiu = []
+
+    caminho, _ = ly.baixar_vtt("abc", str(tmp_path), criar_ydl=Ydl,
+                               dormir=dormiu.append)
+
+    assert estado["chamadas"] == 3
+    assert dormiu == [5.0, 15.0]          # espera crescente, na ordem
+    assert caminho.endswith("abc.pt-BR.vtt")
+
+
+def test_429_esgotado_levanta_erro_com_429(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "YOUTUBE_429_ESPERAS_S", [1.0, 2.0])
+    estado, Ydl = _ydl_que_da_429(tmp_path, 99, True)
+    dormiu = []
+
+    with pytest.raises(ly.ErroLegendasYoutube, match="429"):
+        ly.baixar_vtt("abc", str(tmp_path), criar_ydl=Ydl, dormir=dormiu.append)
+
+    assert estado["chamadas"] == 3        # 1 + 2 esperas, e para
+    assert dormiu == [1.0, 2.0]
+
+
 # --- despachante --------------------------------------------------------------
 
 def test_backend_youtube_e_reconhecido():

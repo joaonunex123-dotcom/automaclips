@@ -186,6 +186,47 @@ etapa 7 compararia performance de clips sem saber que metade do texto veio de
 um modelo e metade de outro, e atribuiria ao trecho uma diferença que era do
 texto.
 
+## Download em 1080p: servidor de PO token
+
+O YouTube só entrega o vídeo em HD inteiro a quem apresenta um **PO token**.
+Sem ele o cliente web devolve só imagens e o `android_vr` é cortado com 403 em
+~10 MB. O pipeline gera o token com o servidor do
+[bgutil-ytdlp-pot-provider](https://github.com/Brainicism/bgutil-ytdlp-pot-provider)
+(plugin do yt-dlp + servidor node em `127.0.0.1:4416`).
+
+`pipeline/download.py` decide sozinho: servidor no ar → tenta `YTDLP_FORMATO`
+(1080p); servidor fora do ar, ou o HD falha → cai para o formato 18 (360p com
+áudio, cliente android), que baixa inteiro sem token. A resolução obtida vai
+para o log (`Baixado ... 1920x1080`) e para `download.ultimo_download`.
+
+**Requisitos:** Python **>= 3.10** (yt-dlp 2026.x não roda no 3.9), `node` e o
+servidor compilado. Instalação, uma vez (macOS arm64 como exemplo; tudo cai em
+`.pot/`, fora do git):
+
+```bash
+uv venv --python 3.13 .venv313
+uv pip install --python .venv313/bin/python -r requirements.txt "yt-dlp[default]" bgutil-ytdlp-pot-provider==2.0.2
+# node (nodejs.org/dist, conferir o SHASUMS256) extraído em .pot/node-vXX-<so>-<arch>/
+git clone --depth 1 --branch 2.0.2 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git .pot/src
+cd .pot/src/server && PATH=../../node-v*/bin:$PATH npm ci && PATH=../../node-v*/bin:$PATH npx tsc
+```
+
+**Subir e parar:**
+
+```bash
+ops/pot_provider.sh subir     # sobe em 127.0.0.1:4416 (BGUTIL_PORTA muda a porta)
+ops/pot_provider.sh status
+ops/pot_provider.sh parar
+```
+
+Log em `.pot/servidor.log`. O servidor só responde em loopback e não guarda
+credencial. Para o processo da fila, `YTDLP_JS_RUNTIME` aponta o node (o yt-dlp
+novo resolve o desafio JS do YouTube com ele) e `POT_PROVIDER_URL` muda a URL.
+
+Um `.mp4` já baixado em 360p **não é trocado sozinho**: apague (ou renomeie) o
+arquivo e o `midia` para rebaixar em HD. HD custa banda e disco: o vídeo de 1h50
+tem ~580 MB em AV1 (1,1 GB se `YTDLP_FORMATO` pedir avc1).
+
 ## Transcrição: local ou pela API
 
 Dois backends, mesmo contrato de saída — nada depois de `transcribe.py` sabe
@@ -232,6 +273,14 @@ ultrapassaria `ORCAMENTO_USD` (padrão 10) é **recusada antes de subir o
 arquivo** — o vídeo fica em `falha` com o motivo. Sem isso o modo de falha real
 é o saldo acabar no meio de uma execução noturna e metade da fila voltar com
 erro de billing. `ORCAMENTO_USD=0` desliga a guarda.
+
+**429 da legenda do YouTube.** O backend `youtube` espera e tenta de novo a cada
+429 (`YOUTUBE_429_ESPERAS_S`, padrão 20, 60, 180 s). Esgotadas as esperas, ou se
+o vídeo não tem legenda, o `processar` cai **sozinho** para a Whisper API
+(`YOUTUBE_FALLBACK_API=0` desliga) passando pela mesma guarda de
+`ORCAMENTO_USD`: se o fallback estouraria o teto, o vídeo fica em `falha` sem
+chamar a API. O custo do fallback entra na tabela `custos` como qualquer
+transcrição paga.
 
 O gasto acumulado aparece no resumo de `python -m pipeline.processar`.
 

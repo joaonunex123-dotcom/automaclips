@@ -23,6 +23,7 @@ from db import repositorio
 from pipeline import download as download_mod
 from pipeline import energia as energia_mod
 from pipeline import highlight_detect
+from pipeline import legendas_youtube
 from pipeline import select_clips
 from pipeline import transcribe as transcribe_mod
 from pipeline import whisper_api
@@ -114,17 +115,34 @@ def _garantir_transcricao(conn, linha, midia, transcrever):
     # O custo só existe no backend pago, e é estimável antes da chamada porque
     # a Whisper API cobra por minuto de áudio, não por token.
     custo = 0.0
-    if transcribe_mod.backend_ativo() == transcribe_mod.BACKEND_OPENAI:
+    backend = transcribe_mod.backend_ativo()
+    if backend == transcribe_mod.BACKEND_OPENAI:
         custo = whisper_api.estimar_custo(duracao)
         _garantir_orcamento(conn, custo, linha["video_id"])
         log.info("Transcrevendo %s pela API (~US$ %.3f, %.0f min)...",
                  linha["video_id"], custo, duracao / 60.0)
     else:
-        log.info("Transcrevendo %s localmente...", linha["video_id"])
+        log.info("Transcrevendo %s (%s)...", linha["video_id"], backend)
 
-    caminho, transcricao = transcrever(
-        midia["audio_path"], linha["video_id"], duracao
-    )
+    try:
+        caminho, transcricao = transcrever(
+            midia["audio_path"], linha["video_id"], duracao
+        )
+    except legendas_youtube.ErroLegendasYoutube as e:
+        # Legenda do YouTube não saiu (429 esgotado, ou sem legenda). Cai para
+        # a API paga, mas SEMPRE pela mesma guarda de orçamento: o fallback não
+        # pode ser o caminho pelo qual o teto é furado.
+        if backend != transcribe_mod.BACKEND_YOUTUBE or not (
+                settings.YOUTUBE_FALLBACK_API and settings.OPENAI_API_KEY):
+            raise
+        custo = whisper_api.estimar_custo(duracao)
+        _garantir_orcamento(conn, custo, linha["video_id"])
+        log.warning("Legenda do YouTube indisponível em %s (%s); caindo para "
+                    "a Whisper API (~US$ %.3f).", linha["video_id"], e, custo)
+        caminho, transcricao = transcrever(
+            midia["audio_path"], linha["video_id"], duracao,
+            backend=transcribe_mod.BACKEND_OPENAI,
+        )
 
     # Registrado DEPOIS do sucesso: chamada que falhou não é cobrada, e
     # reservar orçamento para ela travaria a fila com alguns erros.

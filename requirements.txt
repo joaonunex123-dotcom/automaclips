@@ -13,7 +13,10 @@ anthropic>=0.116.0
 # e o OpenRouter (metadado e recalibração), que é compatível e só muda a
 # base_url. Migrar essas etapas para o OpenRouter não acrescentou dependência.
 openai>=1.30.0
+# HD (1080p) exige yt-dlp 2026.08+ (Python >= 3.10) e o servidor de PO token;
+# ver README, 'Download em 1080p'. Sem eles o download cai para 360p.
 yt-dlp>=2024.1.0
+bgutil-ytdlp-pot-provider==2.0.2
 faster-whisper>=1.0.0
 librosa>=0.10.0
 numpy>=1.24.0
