@@ -214,7 +214,22 @@ def registrar_observacao(conn, video, views, ganho, score, status):
             # atualiza views e score (o histórico continua valendo) mas NÃO
             # empurra o vídeo de volta para 'descoberto' — isso o faria ser
             # baixado e transcrito outra vez.
-            if existente["status"] in STATUS_REAVALIAVEIS:
+            #
+            # 'descoberto' também não volta para a triagem. O score é o ganho
+            # desde a observação ANTERIOR, então a varredura seguinte de um
+            # vídeo recém-descoberto devolve ~0 e o mandaria para
+            # 'abaixo_do_limiar' (foi o caso do Primo Rico). O status só
+            # avança, e o score que o descobriu é mantido: é ele que ordena a
+            # fila. Quem tira um vídeo de 'descoberto' é o pipeline.
+            if (
+                existente["status"] == STATUS_DESCOBERTO
+                and status != STATUS_DESCOBERTO
+            ):
+                conn.execute(
+                    "UPDATE fila_clips SET titulo = ?, views = ? WHERE id = ?",
+                    (video.get("titulo", ""), views, fila_clip_id),
+                )
+            elif existente["status"] in STATUS_REAVALIAVEIS:
                 conn.execute(
                     "UPDATE fila_clips SET titulo = ?, views = ?, score = ?,"
                     " status = ? WHERE id = ?",

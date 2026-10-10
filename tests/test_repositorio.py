@@ -101,18 +101,37 @@ def test_historico_acumula_quando_as_views_mudam(conn, video):
 def test_views_iguais_nao_geram_observacao_repetida(conn, video):
     # Vídeo parado, varrido de novo 6 h depois: nada mudou, nada a registrar.
     clip_id = repositorio.registrar_observacao(
-        conn, video(views=1000), views=1000, ganho=1000, score=250.0,
-        status=repositorio.STATUS_DESCOBERTO,
+        conn, video(views=1000), views=1000, ganho=1000, score=10.0,
+        status=repositorio.STATUS_ABAIXO_DO_LIMIAR,
     )
     repositorio.registrar_observacao(
-        conn, video(views=1000), views=1000, ganho=0, score=0.0,
-        status=repositorio.STATUS_ABAIXO_DO_LIMIAR,
+        conn, video(views=1000), views=1000, ganho=0, score=250.0,
+        status=repositorio.STATUS_DESCOBERTO,
     )
     assert len(_observacoes(conn, clip_id)) == 1
     # ...mas o status e o score da fila acompanham a reavaliação.
     linha = repositorio.buscar_video(conn, "youtube", "vid1")
-    assert linha["status"] == repositorio.STATUS_ABAIXO_DO_LIMIAR
-    assert linha["score"] == 0.0
+    assert linha["status"] == repositorio.STATUS_DESCOBERTO
+    assert linha["score"] == 250.0
+
+
+def test_descoberto_nao_regride_para_a_triagem(conn, video):
+    # O status só avança: 'descoberto' não volta para 'abaixo_do_limiar' nem
+    # vira 'ignorado', e o score que o descobriu continua ordenando a fila.
+    repositorio.registrar_observacao(
+        conn, video(views=1000), views=1000, ganho=1000, score=5000.0,
+        status=repositorio.STATUS_DESCOBERTO,
+    )
+    for rebaixa in (repositorio.STATUS_ABAIXO_DO_LIMIAR, repositorio.STATUS_IGNORADO):
+        repositorio.registrar_observacao(
+            conn, video(views=1200, titulo="Novo título"), views=1200, ganho=200,
+            score=3.0, status=rebaixa,
+        )
+        linha = repositorio.buscar_video(conn, "youtube", "vid1")
+        assert linha["status"] == repositorio.STATUS_DESCOBERTO
+        assert linha["score"] == 5000.0
+        assert linha["views"] == 1200
+        assert linha["titulo"] == "Novo título"
 
 
 def test_views_da_ultima_observacao_distingue_ausencia_de_zero(conn, video):
