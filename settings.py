@@ -761,3 +761,11 @@ MAX_HASHTAGS = _int("MAX_HASHTAGS", 8)
 
 # Publicações processadas por execução.
 PUBLISH_MAX_POR_EXECUCAO = _int("PUBLISH_MAX_POR_EXECUCAO", 10)
+
+# --- log sem segredos ---------------------------------------------------------
+#
+# Instalado aqui porque todo entrypoint importa settings antes de configurar o
+# logging; ver log_seguro.py para o porquê (URLs com ?key= no --verbose).
+import log_seguro  # noqa: E402
+
+log_seguro.instalar()
