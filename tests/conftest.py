@@ -11,7 +11,15 @@ from types import SimpleNamespace
 
 import pytest
 
-import settings
+# O .env real da máquina (chaves, MODEL_FALLBACK, LLM_PROVEDOR...) não pode
+# entrar na suíte: ele mudava o provedor e o fallback e reprovava 5 testes que
+# nada têm a ver com o código. Tem que acontecer ANTES do primeiro
+# `import settings`, que é quem chama load_dotenv.
+import dotenv  # noqa: E402
+
+dotenv.load_dotenv = lambda *args, **kwargs: False
+
+import settings  # noqa: E402
 from db import repositorio
 
 # Instante fixo para todo cálculo de idade. Com datetime.now() os testes de
