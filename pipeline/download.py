@@ -44,6 +44,10 @@ class ErroDownload(Exception):
     """Falha ao baixar ou converter — problema de operação, não de programação."""
 
 
+class FFmpegAusente(ErroDownload):
+    """O ffmpeg não está no PATH: defeito do ambiente, não do vídeo."""
+
+
 def _garantir_ffmpeg(caminho_ffmpeg=None):
     """Resolve o binário do ffmpeg ou falha com instrução, não com FileNotFound.
 
@@ -52,7 +56,7 @@ def _garantir_ffmpeg(caminho_ffmpeg=None):
     """
     caminho = caminho_ffmpeg or shutil.which("ffmpeg")
     if not caminho:
-        raise ErroDownload(
+        raise FFmpegAusente(
             "ffmpeg não encontrado no PATH. É obrigatório: o yt-dlp o usa para "
             "juntar vídeo e áudio, e a extração do .wav depende dele. "
             "Instale (winget install Gyan.FFmpeg) e reabra o terminal."

@@ -3,7 +3,7 @@ import pytest
 
 import settings
 from db import repositorio
-from pipeline import legendas_youtube, processar
+from pipeline import download, legendas_youtube, processar
 
 
 @pytest.fixture
@@ -317,6 +317,27 @@ def test_falha_num_video_nao_derruba_a_fila(conn, enfileirar, injecoes):
     assert repositorio.buscar_video(conn, "youtube", "bom")["status"] == (
         repositorio.STATUS_ANALISADO
     )
+
+
+def test_ffmpeg_ausente_nao_envenena_o_video_e_para_o_lote(
+        conn, enfileirar, injecoes):
+    estado, duplos = injecoes
+    enfileirar(video_id="primeiro", score=9999.0)
+    enfileirar(video_id="segundo", score=10.0)
+
+    def baixar(video_id):
+        estado["baixou"].append(video_id)
+        raise download.FFmpegAusente("ffmpeg não encontrado no PATH")
+
+    duplos["baixar"] = baixar
+    contagem = processar.processar_fila(conn, **duplos)
+
+    assert contagem == {}
+    assert estado["baixou"] == ["primeiro"]
+    for vid in ("primeiro", "segundo"):
+        assert repositorio.buscar_video(conn, "youtube", vid)["status"] == (
+            repositorio.STATUS_DESCOBERTO
+        )
 
 
 def test_sucesso_limpa_o_erro_anterior(conn, enfileirar, injecoes):

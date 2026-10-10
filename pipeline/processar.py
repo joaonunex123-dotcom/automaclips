@@ -251,6 +251,13 @@ def processar_fila(conn, limite=None, retentar=False, **injecoes):
     for linha in pendentes:
         try:
             selecionados = processar_video(conn, linha, **injecoes)
+        except download_mod.FFmpegAusente as e:
+            # Defeito do ambiente: marcar 'falha' envenenaria o vídeo (a fila
+            # não o retenta) e os próximos da fila falhariam igual. Deixa
+            # pendente e para o lote.
+            log.error("Lote interrompido, %s segue pendente: %s",
+                      linha["video_id"], e)
+            break
         except Exception as e:
             # Amplo de propósito: yt-dlp, ffmpeg, Whisper e o SDK da Anthropic
             # levantam hierarquias de exceção sem nada em comum, e nenhuma
