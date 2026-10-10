@@ -65,3 +65,6 @@ __pycache__/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Backups do banco feitos à mão (clips.db.bak, clips.db.pre-limpeza, e seus -wal/-shm).
+clips.db*
