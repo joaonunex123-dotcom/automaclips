@@ -54,6 +54,14 @@ reescrito pelo próprio sistema na etapa 7.
 
 ## Uso
 
+O Python oficial do projeto é o `.venv313` (3.13; o yt-dlp novo exige >= 3.10).
+Rode tudo com ele, ativado ou direto pelo caminho:
+
+```bash
+source .venv313/bin/activate            # ou: .venv313/bin/python -m ...
+.venv313/bin/python -m pytest           # suíte
+```
+
 ```bash
 python -m sourcing.descobrir
 ```
