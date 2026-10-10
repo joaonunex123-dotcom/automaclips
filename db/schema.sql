@@ -366,12 +366,18 @@ CREATE TABLE IF NOT EXISTS tokens (
 -- `modelo_respondeu` pode divergir de `modelo_pedido`: o OpenRouter roteia
 -- para variantes, e o fallback entra quando a resposta vem malformada. É o
 -- que respondeu que conta.
+--
+-- `provedor` é quem respondeu (anthropic | openai | openrouter), vazio nas
+-- linhas anteriores à coluna. Com fallback entre provedores, o nome do modelo
+-- sozinho não diz de onde veio; `usou_fallback` = 1 e provedor diferente do
+-- configurado é o rastro de que o primário falhou.
 CREATE TABLE IF NOT EXISTS geracoes_llm (
     id               INTEGER PRIMARY KEY,
     etapa            TEXT NOT NULL,
     referencia       TEXT NOT NULL DEFAULT '',
     modelo_pedido    TEXT NOT NULL,
     modelo_respondeu TEXT NOT NULL DEFAULT '',
+    provedor         TEXT NOT NULL DEFAULT '',
     usou_fallback    INTEGER NOT NULL DEFAULT 0,
     tokens_entrada   INTEGER,
     tokens_saida     INTEGER,

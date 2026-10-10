@@ -51,6 +51,15 @@ class ErroHighlight(claude_cliente.ErroClaude):
     teto de tokens estourado), que não são problema do modelo."""
 
 
+class TranscricaoGrande(ErroHighlight):
+    """Guarda de custo: a transcrição passa do teto.
+
+    Subclasse à parte porque é a única falha que o fallback entre provedores
+    NÃO deve tentar contornar — o vídeo é grande demais para qualquer um dos
+    dois, e refazer só gastaria a chamada que a guarda existe para evitar.
+    """
+
+
 # --- prompt -------------------------------------------------------------------
 
 _INSTRUCOES = """\
@@ -234,8 +243,14 @@ def _sanear(trechos):
 
 
 def _detectar_via_llm_client(transcricao_texto, exemplos, licoes, modelo,
-                             cliente, conn, referencia, limite_tokens):
+                             cliente, conn, referencia, limite_tokens,
+                             provedor="openai", provedor_destino=None,
+                             modelo_fallback_interno=None, via_fallback=False):
     """Caminho fora da Anthropic (OpenRouter ou OpenAI), pelo llm_client.
+
+    `provedor` é o rótulo gravado em geracoes_llm; `provedor_destino` é para
+    onde o llm_client aponta (None = LLM_PROVEDOR, o comportamento de sempre).
+    `via_fallback` marca que esta chamada É o fallback entre provedores.
 
     Perde três coisas em relação ao caminho do Claude, e vale saber quais: a
     saída estruturada GARANTIDA (aqui o JSON é pedido, não garantido, e depende
@@ -246,6 +261,8 @@ def _detectar_via_llm_client(transcricao_texto, exemplos, licoes, modelo,
     import llm_client
 
     modelo = modelo or settings.MODEL_HIGHLIGHT
+    if modelo_fallback_interno is None and not via_fallback:
+        modelo_fallback_interno = settings.MODEL_FALLBACK
     sistema = montar_sistema(exemplos, licoes=licoes, com_formato=True)
 
     # Guarda de custo APROXIMADA: aqui não há o contador de tokens do provedor
@@ -255,7 +272,7 @@ def _detectar_via_llm_client(transcricao_texto, exemplos, licoes, modelo,
     if limite:
         teto = limite * settings.CARACTERES_POR_TOKEN
         if len(transcricao_texto) > teto:
-            raise ErroHighlight(
+            raise TranscricaoGrande(
                 f"transcrição com {len(transcricao_texto)} caracteres passa do "
                 f"teto aproximado de {teto:.0f} (TRANSCRICAO_MAX_TOKENS). "
                 "Vídeo pulado sem custo de API."
@@ -264,8 +281,8 @@ def _detectar_via_llm_client(transcricao_texto, exemplos, licoes, modelo,
     try:
         dados, detalhes = llm_client.call_llm(
             transcricao_texto, model=modelo, system=sistema, expect_json=True,
-            fallback_model=settings.MODEL_FALLBACK, cliente=cliente,
-            com_detalhes=True,
+            fallback_model=modelo_fallback_interno, cliente=cliente,
+            com_detalhes=True, provedor=provedor_destino,
         )
     except llm_client.ErroLLM as e:
         raise ErroHighlight(str(e)) from e
@@ -276,7 +293,8 @@ def _detectar_via_llm_client(transcricao_texto, exemplos, licoes, modelo,
         repositorio.registrar_geracao(
             conn, repositorio.ETAPA_HIGHLIGHT, modelo, referencia=referencia,
             modelo_respondeu=detalhes.get("modelo_respondeu", ""),
-            usou_fallback=detalhes.get("usou_fallback", False),
+            provedor=provedor,
+            usou_fallback=via_fallback or detalhes.get("usou_fallback", False),
             tokens_entrada=detalhes.get("tokens_entrada"),
             tokens_saida=detalhes.get("tokens_saida"),
         )
@@ -292,39 +310,17 @@ def _detectar_via_llm_client(transcricao_texto, exemplos, licoes, modelo,
     return trechos
 
 
-def detectar(transcricao_texto, cliente=None, exemplos=None, modelo=None,
-             max_tokens=None, effort=None, usar_fallbacks=None,
-             limite_tokens=None, conn=None, referencia="", licoes="",
-             provedor=None):
-    """Trechos candidatos a partir da transcrição já formatada.
-
-    Devolve dicts no vocabulário do banco (inicio_s, fim_s, score_claude,
-    motivo, hook_text) — a tradução dos nomes da API acontece aqui, e não
-    espalhada pelo resto do pipeline.
-
-    Continua no Claude direto, e de propósito: escolher o trecho é a decisão
-    que define o produto, e é a última coisa deste pipeline onde vale a pena
-    economizar. `conn` é opcional e só registra qual modelo escolheu — sem
-    isso, a etapa 7 compararia clips sem saber que a seleção mudou de modelo
-    no meio da série.
-    """
-    if not (transcricao_texto or "").strip():
-        raise ErroHighlight("transcrição vazia — nada a analisar.")
-
-    escolhido = (provedor or settings.HIGHLIGHT_PROVEDOR or "").strip().lower()
-    if escolhido != "anthropic":
-        return _detectar_via_llm_client(
-            transcricao_texto, exemplos, licoes, modelo, cliente, conn,
-            referencia, limite_tokens,
-        )
-
+def _detectar_anthropic(transcricao_texto, cliente, exemplos, modelo,
+                        max_tokens, effort, usar_fallbacks, limite_tokens,
+                        conn, referencia, licoes):
+    """Caminho do Claude direto: saída estruturada, cache, fallback server-side."""
     cliente = cliente if cliente is not None else construir_cliente()
     sistema = montar_sistema(exemplos, licoes=licoes)
 
     limite = settings.TRANSCRICAO_MAX_TOKENS if limite_tokens is None else limite_tokens
     tokens = contar_tokens(cliente, sistema, transcricao_texto, modelo=modelo)
     if limite and tokens > limite:
-        raise ErroHighlight(
+        raise TranscricaoGrande(
             f"transcrição com {tokens} tokens excede o teto de {limite} "
             "(TRANSCRICAO_MAX_TOKENS). Vídeo pulado sem custo de API."
         )
@@ -343,6 +339,10 @@ def detectar(transcricao_texto, cliente=None, exemplos=None, modelo=None,
         # Com output_config.format isto não deveria acontecer; se acontecer, é
         # sinal de mudança no contrato da API, não de "LLM sendo LLM".
         raise ErroHighlight(f"resposta não é JSON válido: {e}") from e
+    if not isinstance(dados, dict):
+        raise ErroHighlight(
+            f"resposta não é um objeto JSON: {type(dados).__name__}"
+        )
 
     trechos = _sanear(dados.get("trechos") or [])
     log.info("Claude devolveu %d trechos, %d utilizáveis.",
@@ -355,5 +355,96 @@ def detectar(transcricao_texto, cliente=None, exemplos=None, modelo=None,
             conn, repositorio.ETAPA_HIGHLIGHT, modelo or settings.CLAUDE_MODELO,
             referencia=referencia,
             modelo_respondeu=getattr(mensagem, "model", "") or "",
+            provedor="anthropic",
         )
     return trechos
+
+
+def _fallback_entre_provedores(escolhido, modelo):
+    """(provedor, modelo) do fallback, ou None quando está desligado.
+
+    Desligado com MODEL_HIGHLIGHT_FALLBACK vazio, e também quando ele apontaria
+    para exatamente o que acabou de falhar — refazer a mesma chamada no mesmo
+    lugar não é fallback, é gastar de novo.
+    """
+    modelo_fb = (settings.MODEL_HIGHLIGHT_FALLBACK or "").strip()
+    if not modelo_fb:
+        return None
+    provedor_fb = (settings.HIGHLIGHT_PROVEDOR_FALLBACK or "openai").strip().lower()
+    principal = modelo or (settings.CLAUDE_MODELO if escolhido == "anthropic"
+                           else settings.MODEL_HIGHLIGHT)
+    if (provedor_fb, modelo_fb) == (escolhido, principal):
+        return None
+    return provedor_fb, modelo_fb
+
+
+def detectar(transcricao_texto, cliente=None, exemplos=None, modelo=None,
+             max_tokens=None, effort=None, usar_fallbacks=None,
+             limite_tokens=None, conn=None, referencia="", licoes="",
+             provedor=None, cliente_fallback=None):
+    """Trechos candidatos a partir da transcrição já formatada.
+
+    Devolve dicts no vocabulário do banco (inicio_s, fim_s, score_claude,
+    motivo, hook_text) — a tradução dos nomes da API acontece aqui, e não
+    espalhada pelo resto do pipeline.
+
+    Continua no Claude direto, e de propósito: escolher o trecho é a decisão
+    que define o produto, e é a última coisa deste pipeline onde vale a pena
+    economizar. `conn` é opcional e só registra qual modelo escolheu — sem
+    isso, a etapa 7 compararia clips sem saber que a seleção mudou de modelo
+    no meio da série.
+
+    Com MODEL_HIGHLIGHT_FALLBACK preenchido, qualquer falha do provedor
+    principal — erro de API, saldo, timeout, rate limit, recusa, JSON inválido
+    depois das tentativas que ele já faz — refaz a escolha no provedor de
+    fallback. Só a guarda de custo fica de fora (ver TranscricaoGrande). Se os
+    dois falharem, sobe ErroHighlight com o motivo de cada um; o processar
+    marca o vídeo como falha, retentável, e não o perde.
+
+    `cliente` é o do provedor principal e `cliente_fallback` o do de fallback:
+    são SDKs diferentes, então um não serve ao outro.
+    """
+    if not (transcricao_texto or "").strip():
+        raise ErroHighlight("transcrição vazia — nada a analisar.")
+
+    escolhido = (provedor or settings.HIGHLIGHT_PROVEDOR or "").strip().lower()
+    fallback = _fallback_entre_provedores(escolhido or "anthropic", modelo)
+
+    def _principal():
+        if escolhido != "anthropic":
+            return _detectar_via_llm_client(
+                transcricao_texto, exemplos, licoes, modelo, cliente, conn,
+                referencia, limite_tokens, provedor=escolhido or "openai",
+            )
+        return _detectar_anthropic(
+            transcricao_texto, cliente, exemplos, modelo, max_tokens, effort,
+            usar_fallbacks, limite_tokens, conn, referencia, licoes,
+        )
+
+    if fallback is None:
+        return _principal()
+
+    try:
+        return _principal()
+    except TranscricaoGrande:
+        raise
+    except Exception as e_principal:
+        # Amplo de propósito, pelo mesmo motivo do processar_fila: o SDK da
+        # Anthropic e o da OpenAI levantam hierarquias sem nada em comum, e
+        # todas elas significam "este provedor não respondeu".
+        provedor_fb, modelo_fb = fallback
+        log.warning("%s falhou na escolha do trecho (%s); refazendo em %s/%s.",
+                    escolhido or "anthropic", e_principal, provedor_fb,
+                    modelo_fb)
+        try:
+            return _detectar_via_llm_client(
+                transcricao_texto, exemplos, licoes, modelo_fb, cliente_fallback,
+                conn, referencia, limite_tokens, provedor=provedor_fb,
+                provedor_destino=provedor_fb, via_fallback=True,
+            )
+        except Exception as e_fallback:
+            raise ErroHighlight(
+                f"nem o provedor principal ({escolhido or 'anthropic'}: "
+                f"{e_principal}) nem o fallback ({provedor_fb}/{modelo_fb}: "
+                f"{e_fallback}) escolheram os trechos."
+            ) from e_fallback

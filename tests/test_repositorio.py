@@ -605,3 +605,13 @@ def test_dado_antigo_sobrevive_a_coluna_nova(conn, clip_publicavel):
         assert linha["compartilhamentos"] == 0
     finally:
         outra.close()
+
+
+def test_banco_antigo_ganha_a_coluna_provedor_das_geracoes(conn):
+    # clips.db que já existia antes do fallback entre provedores: sem a
+    # migração, o INSERT de registrar_geracao falharia (e em silêncio, porque
+    # registrar_geracao nunca derruba quem chamou).
+    conn.execute("ALTER TABLE geracoes_llm DROP COLUMN provedor")
+    assert repositorio.aplicar_colunas_novas(conn) == ["geracoes_llm.provedor"]
+    repositorio.registrar_geracao(conn, "highlight", "gpt-x", provedor="openai")
+    assert repositorio.geracoes(conn)[0]["provedor"] == "openai"

@@ -72,6 +72,7 @@ BUSY_TIMEOUT_MS = 5000
 # colunas), então os dois bancos se comportam igual.
 COLUNAS_ACRESCENTADAS = (
     ("resultados", "compartilhamentos", "INTEGER NOT NULL DEFAULT 0"),
+    ("geracoes_llm", "provedor", "TEXT NOT NULL DEFAULT ''"),
 )
 
 
@@ -800,7 +801,7 @@ ETAPA_RECALIBRATE = "recalibrate"
 
 def registrar_geracao(conn, etapa, modelo_pedido, referencia="",
                       modelo_respondeu="", usou_fallback=False,
-                      tokens_entrada=None, tokens_saida=None):
+                      tokens_entrada=None, tokens_saida=None, provedor=""):
     """Anota qual modelo produziu uma saída. Nunca derruba quem chamou.
 
     Registro é observabilidade, não trabalho: uma falha ao gravar aqui não
@@ -811,11 +812,11 @@ def registrar_geracao(conn, etapa, modelo_pedido, referencia="",
             conn.execute(
                 "INSERT INTO geracoes_llm"
                 " (etapa, referencia, modelo_pedido, modelo_respondeu,"
-                "  usou_fallback, tokens_entrada, tokens_saida)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "  provedor, usou_fallback, tokens_entrada, tokens_saida)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (etapa, str(referencia), modelo_pedido,
-                 modelo_respondeu or modelo_pedido, 1 if usou_fallback else 0,
-                 tokens_entrada, tokens_saida),
+                 modelo_respondeu or modelo_pedido, provedor or "",
+                 1 if usou_fallback else 0, tokens_entrada, tokens_saida),
             )
     except sqlite3.Error as e:
         log.warning("Não consegui registrar a geração de %s: %s", etapa, e)
