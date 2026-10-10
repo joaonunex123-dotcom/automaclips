@@ -302,3 +302,10 @@ def test_erro_da_api_vira_erro_do_modulo(
             cliente=cliente_openai(erro=RuntimeError("saldo insuficiente")),
             destino_dir=str(tmp_path), executar=executar_ok(),
         )
+
+
+def test_base_url_vazia_no_env_usa_o_padrao_da_openai(monkeypatch):
+    # OPENAI_BASE_URL= no .env vira '' no ambiente; o SDK a tomaria por URL.
+    monkeypatch.setenv("OPENAI_BASE_URL", "")
+    cliente = whisper_api.construir_cliente(api_key="sk-teste")
+    assert str(cliente.base_url).startswith("https://api.openai.com/v1")

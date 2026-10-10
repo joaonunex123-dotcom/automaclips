@@ -74,7 +74,11 @@ def construir_cliente(api_key=None):
         raise ErroWhisperAPI(
             "SDK openai não instalado (pip install -r requirements.txt)."
         ) from e
-    return OpenAI(api_key=api_key)
+    # OPENAI_BASE_URL= vazio no .env chega ao SDK como '' (e não como ausente),
+    # que o aceita como URL e falha com "Connection error". Vazio = padrão.
+    base_url = (os.environ.get("OPENAI_BASE_URL") or "").strip()
+    return OpenAI(api_key=api_key,
+                  base_url=base_url or "https://api.openai.com/v1")
 
 
 # --- preparo do áudio ---------------------------------------------------------
