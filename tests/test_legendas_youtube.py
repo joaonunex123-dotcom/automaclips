@@ -238,6 +238,10 @@ def test_pede_a_automatica_por_padrao(tmp_path):
     assert vistos["writesubtitles"] is False
     # Não baixa o vídeo: só a legenda, que são alguns KB.
     assert vistos["skip_download"] is True
+    # Mesmo cliente do download: o padrão do yt-dlp não abre mais a página.
+    assert vistos["extractor_args"] == {
+        "youtube": {"player_client": ["android_vr"]}
+    }
 
 
 def test_preferir_manual_inverte(tmp_path):

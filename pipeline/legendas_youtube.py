@@ -29,6 +29,7 @@ import os
 import re
 
 import settings
+from pipeline import download
 
 log = logging.getLogger(__name__)
 
@@ -243,6 +244,7 @@ def baixar_vtt(video_id, destino_dir, idiomas=None, preferir=None,
         "writeautomaticsub": automatica,
         "subtitleslangs": list(idiomas),
         "subtitlesformat": "vtt",
+        "extractor_args": download.YTDLP_EXTRACTOR_ARGS,
         "outtmpl": os.path.join(destino_dir, "%(id)s.%(ext)s"),
         "quiet": True,
         "no_warnings": True,

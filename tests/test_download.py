@@ -111,6 +111,10 @@ def test_baixa_e_devolve_caminho_e_duracao(tmp_path, ffmpeg_falso):
     assert criados[0].urls == [("https://www.youtube.com/watch?v=vid1", True)]
     # mp4 para a etapa 3 não ter de adivinhar o container ao cortar.
     assert criados[0].opcoes["merge_output_format"] == "mp4"
+    # O cliente padrão do yt-dlp falha com "The page needs to be reloaded".
+    assert criados[0].opcoes["extractor_args"] == {
+        "youtube": {"player_client": ["android_vr"]}
+    }
 
 
 def test_falha_do_ytdlp_vira_erro_do_modulo(tmp_path, ffmpeg_falso):

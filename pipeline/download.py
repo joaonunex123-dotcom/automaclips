@@ -23,6 +23,13 @@ import settings
 log = logging.getLogger(__name__)
 
 
+# O cliente padrão do yt-dlp (tv/web) falha hoje com "The page needs to be
+# reloaded" para qualquer vídeo, e o SABR derruba o resto dos formatos. O
+# android_vr devolve formatos e legendas sem PO token nem cookies. Compartilhado
+# com legendas_youtube: os dois falam com o YouTube do mesmo jeito.
+YTDLP_EXTRACTOR_ARGS = {"youtube": {"player_client": ["android_vr"]}}
+
+
 class ErroDownload(Exception):
     """Falha ao baixar ou converter — problema de operação, não de programação."""
 
@@ -90,6 +97,7 @@ def baixar_video(video_id, destino_dir=None, formato=None, criar_ydl=None,
         # mp4 para a etapa 3 não precisar adivinhar o container na hora de
         # cortar.
         "merge_output_format": "mp4",
+        "extractor_args": YTDLP_EXTRACTOR_ARGS,
         "ffmpeg_location": os.path.dirname(ffmpeg) or None,
         "quiet": True,
         "noprogress": True,
