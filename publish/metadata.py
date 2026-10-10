@@ -38,6 +38,12 @@ from db import repositorio
 log = logging.getLogger(__name__)
 
 
+# Regra da hashtag. Vale no prompt E na validação em Python (`_limpar_hashtag`):
+# o prompt pede, o código garante — mesma razão do limite de título.
+HASHTAG_MAX_PALAVRAS = 2
+HASHTAG_MAX_CARACTERES = 20
+
+
 class ErroMetadata(llm_client.ErroLLM):
     """Falha ao gerar o metadado."""
 
@@ -70,7 +76,12 @@ sozinha, sem depender do que viria depois dela.
 As hashtags são específicas do assunto, não genéricas de plataforma. \
 "#viral" e "#fyp" não dizem nada sobre o conteúdo e competem com milhões de \
 posts; o nome do tema, da pessoa ou do nicho competem com centenas. Devolva \
-sem o '#', uma palavra ou expressão por item.
+sem o '#', um item por hashtag.
+
+Hashtag é termo de busca comum: o que alguém digitaria para achar este \
+assunto, como "negócios", "empreendedorismo" ou "marketing digital". Frase \
+montada para o vídeo, como "história de negócio" ou "o que ele nunca contou", \
+ninguém procura, então não serve.
 
 As listas por plataforma divergem porque a busca de cada uma divergiu: no \
 TikTok a hashtag funciona como termo de busca de nicho, e vale a expressão \
@@ -122,7 +133,10 @@ def montar_sistema(max_hashtags=None, limite_titulo=None, limite_tiktok=None):
         f"{_INSTRUCOES}\n\n"
         f"O título precisa caber em {limite_titulo:d} caracteres, e a caption "
         f"do TikTok em {limite_tiktok:d}. "
-        f"Devolva até {max_hashtags:d} hashtags por lista.\n\n"
+        f"Devolva até {max_hashtags:d} hashtags por lista. "
+        f"Cada hashtag tem no máximo {HASHTAG_MAX_PALAVRAS:d} palavras e "
+        f"{HASHTAG_MAX_CARACTERES:d} caracteres (contando as letras coladas), "
+        f"só letras e números: sem hífen, sublinhado, emoji ou pontuação.\n\n"
         f"{descricao_do_formato()}"
     )
 
@@ -162,22 +176,49 @@ def fala_do_trecho(transcricao, inicio_s, fim_s):
 
 
 def _limpar_hashtag(bruta):
-    """'#Meu Assunto!' -> 'meuassunto'. Vazio quando não sobra nada."""
+    """'#Meu Assunto!' -> 'meuassunto'. None quando fora da regra.
+
+    Ajusta o que é só forma (cerquilha, caixa, pontuação, hífen, espaço: as
+    palavras são coladas, como o humano faria à mão) e DESCARTA o que é
+    conteúdo: mais de `HASHTAG_MAX_PALAVRAS` palavras ou mais de
+    `HASHTAG_MAX_CARACTERES` caracteres. Cortar "históriadenegócio" no vigésimo
+    caractere ou ficar com as duas primeiras palavras de uma frase daria uma
+    hashtag que ninguém busca — pior que nenhuma.
+
+    Palavra é o que o modelo separou por espaço ou símbolo; só letras (com
+    acento) e dígitos contam, e sublinhado sai.
+    """
     texto = str(bruta).strip().lstrip("#")
-    # Plataforma nenhuma aceita espaço ou pontuação dentro da hashtag; colar as
-    # palavras é o que o humano faria à mão.
-    return re.sub(r"[^0-9A-Za-zÀ-ÿ_]", "", texto).lower()
+    palavras = [p for p in re.split(r"[^\w]|_", texto) if p]
+    palavras = ["".join(c for c in p if c.isalnum()) for p in palavras]
+    palavras = [p for p in palavras if p]
+    if not palavras or len(palavras) > HASHTAG_MAX_PALAVRAS:
+        return None
+    colada = "".join(palavras).lower()
+    if len(colada) > HASHTAG_MAX_CARACTERES:
+        return None
+    return colada
 
 
 def normalizar_hashtags(brutas, maximo=None):
-    """Limpa, tira repetição e corta no teto, preservando a ordem."""
+    """Limpa, descarta o que foge da regra, tira repetição e corta no teto.
+
+    Preserva a ordem. Descartar é registrado: hashtag que some em silêncio é
+    o prompt voltando a falhar sem ninguém ver.
+    """
     maximo = settings.MAX_HASHTAGS if maximo is None else maximo
-    vistas, saida = set(), []
+    vistas, saida, descartadas = set(), [], []
     for bruta in brutas or []:
         limpa = _limpar_hashtag(bruta)
-        if limpa and limpa not in vistas:
+        if limpa is None:
+            descartadas.append(bruta)
+        elif limpa not in vistas:
             vistas.add(limpa)
             saida.append(limpa)
+    if descartadas:
+        log.info("Hashtags fora da regra (até %d palavras, %d caracteres), "
+                 "descartadas: %r", HASHTAG_MAX_PALAVRAS,
+                 HASHTAG_MAX_CARACTERES, descartadas)
     return saida[:maximo]
 
 

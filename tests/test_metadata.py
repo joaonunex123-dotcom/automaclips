@@ -110,6 +110,65 @@ def test_hashtag_que_vira_vazia_e_descartada():
     assert metadata.normalizar_hashtags(["#", "!!!", "boa"]) == ["boa"]
 
 
+def test_hashtag_de_ate_duas_palavras_vira_uma_so():
+    assert metadata.normalizar_hashtags(["#marketing digital", "Gestão"]) == [
+        "marketingdigital", "gestão"
+    ]
+
+
+def test_hashtag_com_mais_de_duas_palavras_e_descartada():
+    # A frase montada ("história de negócio") é o caso que motivou a regra:
+    # ninguém busca isso. Cortar para as duas primeiras daria "históriade".
+    assert metadata.normalizar_hashtags(
+        ["história de negócio", "#o que ele contou", "negócios"]
+    ) == ["negócios"]
+
+
+def test_hashtag_acima_de_20_caracteres_e_descartada_nao_cortada():
+    vinte = "a" * 20
+    assert metadata.normalizar_hashtags([vinte, vinte + "b"]) == [vinte]
+    # Contam os caracteres COLADOS, não os da forma original com espaço.
+    assert metadata.normalizar_hashtags(["empreendedorismo digital"]) == []
+
+
+def test_hashtag_so_aceita_letras_e_numeros():
+    assert metadata.normalizar_hashtags(
+        ["#cripto_moeda", "r$100", "top10", "😀", "ok🚀"]
+    ) == ["criptomoeda", "r100", "top10", "ok"]
+
+
+def test_hashtag_descartada_nao_derruba_o_resto_nem_a_ordem():
+    saida = metadata.normalizar_hashtags(
+        ["podcast", "uma frase longa demais", "entrevista"]
+    )
+    assert saida == ["podcast", "entrevista"]
+
+
+def test_teto_conta_so_as_hashtags_validas():
+    brutas = ["uma frase de tres"] * 5 + [f"tag{i}" for i in range(6)]
+    assert len(metadata.normalizar_hashtags(brutas, maximo=4)) == 4
+
+
+def test_normalizar_aplica_a_regra_nas_tres_listas():
+    meta = metadata.normalizar({
+        **RESPOSTA,
+        "hashtags": ["história de negócio", "podcast"],
+        "hashtags_instagram": ["tres palavras aqui", "bastidores"],
+        "hashtags_tiktok": ["cortes de podcast famosos", "x" * 21],
+    })
+    assert meta["hashtags"] == ["podcast"]
+    assert meta["hashtags_instagram"] == ["bastidores"]
+    # Tudo descartado nas do TikTok: cai nas gerais, como se o modelo as omitisse.
+    assert meta["hashtags_tiktok"] == ["podcast"]
+
+
+def test_prompt_declara_a_regra_da_hashtag():
+    sistema = metadata.montar_sistema()
+    assert f"{metadata.HASHTAG_MAX_PALAVRAS} palavras" in sistema
+    assert f"{metadata.HASHTAG_MAX_CARACTERES} caracteres" in sistema
+    assert "termo de busca" in sistema
+
+
 # --- limites ------------------------------------------------------------------
 
 def test_titulo_e_cortado_no_limite_da_plataforma(cliente_openrouter):
