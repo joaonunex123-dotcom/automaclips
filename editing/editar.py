@@ -22,6 +22,7 @@ import sys
 
 import settings
 from db import repositorio
+from editing import efeitos as efeitos_mod
 from editing import layout as layout_mod
 from editing import legendas as legendas_mod
 from editing import render as render_mod
@@ -78,9 +79,10 @@ def renderizar_clip(conn, linha, config, biblioteca=None, carregar_transcricao=N
         duracao_s=duracao,
     )
 
+    picos = repositorio.picos_do_clip(conn, linha["id"])
     sons = sfx_mod.planejar(
         config, duracao,
-        picos=repositorio.picos_do_clip(conn, linha["id"]),
+        picos=picos,
         palavras=palavras,
         biblioteca=biblioteca if biblioteca is not None else {},
     )
@@ -95,6 +97,12 @@ def renderizar_clip(conn, linha, config, biblioteca=None, carregar_transcricao=N
     )
     if plano:
         extras["filler"] = plano
+    # Efeitos de edição: só entram na chamada quando alguma flag está ligada,
+    # então com a seção desligada o renderizador é chamado como antes.
+    if efeitos_mod.algum_ativo(config):
+        sons = list(sons) + efeitos_mod.plano_pad(
+            config, layout_mod.separar(variante)[1] or layout_mod.FULL)
+        extras["efeitos"] = {"picos": list(picos or [])}
 
     caminho = renderizar(
         config_layout, video_path, inicio, fim, ass_texto, nome,
@@ -119,6 +127,10 @@ def renderizar_fila(conn, limite=None, config=None, biblioteca=None, **injecoes)
     # produziria a fila inteira em 'falha' com a mesma mensagem repetida.
     if biblioteca is None:
         biblioteca = sfx_mod.carregar_biblioteca(config)
+    # Idem para o pad ambiente de cada categoria que a fila pode sortear.
+    categorias = {layout_mod.separar(v)[1] or layout_mod.FULL
+                  for v in layout_mod.variantes_disponiveis(config)}
+    efeitos_mod.verificar_pads(config, categorias)
     if biblioteca:
         log.info("Efeitos carregados: %s.", ", ".join(sorted(biblioteca)))
 
@@ -194,7 +206,7 @@ def main(argv=None):
     conn = repositorio.conectar()
     try:
         contagem = renderizar_fila(conn, limite=args.limite, config=config)
-    except sfx_mod.ErroSFX as e:
+    except (sfx_mod.ErroSFX, efeitos_mod.ErroEfeitos) as e:
         # Erro de configuração, não de um clip: abortar é melhor do que
         # renderizar a fila inteira sem os efeitos que o template mandava.
         log.error("%s", e)

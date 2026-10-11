@@ -179,11 +179,16 @@ def filtro_split(config, indice_filler, entrada):
     return grafo + "[vs];"
 
 
-def filtergraph(config, ass_nome, duracao_s, sons=None, filler=None):
+def filtergraph(config, ass_nome, duracao_s, sons=None, filler=None,
+                efeitos=None):
     """Grafo completo: vídeo em [vout], e áudio em [aout] quando há efeito.
 
     `filler` (dict de editing.layout.planejar_filler) liga o layout split.
+    `efeitos` ({"picos": [...]}) alimenta a seção `efeitos` do template; com
+    ela toda desligada o grafo é byte a byte o de antes de ela existir.
     """
+    from editing import efeitos as efeitos_mod
+
     altura_clip = None
     if filler:
         from editing import layout as layout_mod
@@ -193,19 +198,29 @@ def filtergraph(config, ass_nome, duracao_s, sons=None, filler=None):
     zoom = filtro_zoom(config, duracao_s, altura_clip)
     grafo += zoom
     entrada = "[vz]" if zoom else "[vr]"
+    picos = (efeitos or {}).get("picos")
+    punch = efeitos_mod.filtro_punch(config, duracao_s, entrada, altura_clip, picos)
+    if punch:
+        grafo += punch
+        entrada = "[vp]"
     if filler:
         grafo += filtro_split(config, 1 + len(sons or []), entrada)
         entrada = "[vs]"
+    acabamento, entrada = efeitos_mod.filtro_acabamento(config, duracao_s, entrada)
+    grafo += acabamento
     grafo += f"{entrada}ass={ass_nome}[vout]"
 
-    audio = cadeia_audio(sons)
+    if efeitos_mod.audio_ativo(config):
+        audio = efeitos_mod.cadeia_audio(config, sons, duracao_s)
+    else:
+        audio = cadeia_audio(sons)
     if audio:
         grafo += ";" + audio
     return grafo
 
 
 def comando(config, video_path, inicio_s, duracao_s, ass_nome, saida_path,
-            ffmpeg="ffmpeg", sons=None, filler=None):
+            ffmpeg="ffmpeg", sons=None, filler=None, efeitos=None):
     """Argumentos do ffmpeg, como lista. Função pura."""
     saida = config["saida"]
     argumentos = [
@@ -219,6 +234,8 @@ def comando(config, video_path, inicio_s, duracao_s, ass_nome, saida_path,
         "-i", video_path,
     ]
     for som in sons or []:
+        if som.get("loop"):       # cama ambiente: mais curta que o clip
+            argumentos += ["-stream_loop", "-1"]
         argumentos += ["-i", som["caminho"]]
     if filler:
         # Última entrada. -stream_loop só quando o arquivo é mais curto que o
@@ -232,12 +249,15 @@ def comando(config, video_path, inicio_s, duracao_s, ass_nome, saida_path,
         ]
 
     argumentos += [
-        "-filter_complex", filtergraph(config, ass_nome, duracao_s, sons, filler),
+        "-filter_complex",
+        filtergraph(config, ass_nome, duracao_s, sons, filler, efeitos),
         "-map", "[vout]",
     ]
     # Com efeito, o áudio sai do amix. Sem efeito, o '?' torna a trilha
     # opcional: vídeo mudo não pode derrubar o render.
-    argumentos += ["-map", "[aout]"] if sons else ["-map", "0:a?"]
+    from editing import efeitos as efeitos_mod
+    com_aout = bool(sons) or efeitos_mod.audio_ativo(config)
+    argumentos += ["-map", "[aout]"] if com_aout else ["-map", "0:a?"]
 
     argumentos += [
         "-c:v", str(saida["codec_video"]),
@@ -255,7 +275,8 @@ def comando(config, video_path, inicio_s, duracao_s, ass_nome, saida_path,
 
 
 def renderizar(config, video_path, inicio_s, fim_s, ass_texto, nome, destino_dir=None,
-               executar=None, caminho_ffmpeg=None, sons=None, filler=None):
+               executar=None, caminho_ffmpeg=None, sons=None, filler=None,
+               efeitos=None):
     """Escreve o .ass, roda o ffmpeg e devolve o caminho do .mp4."""
     from pipeline.download import _garantir_ffmpeg
 
@@ -275,7 +296,7 @@ def renderizar(config, video_path, inicio_s, fim_s, ass_texto, nome, destino_dir
     duracao = max(0.0, float(fim_s) - float(inicio_s))
     argumentos = comando(
         config, video_path, inicio_s, duracao, ass_nome, saida_path, ffmpeg,
-        sons=sons, filler=filler,
+        sons=sons, filler=filler, efeitos=efeitos,
     )
 
     # cwd no diretório do .ass: ver a docstring do módulo.

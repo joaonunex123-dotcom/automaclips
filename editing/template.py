@@ -70,6 +70,28 @@ PADRAO = {
         "na_abertura": True, "no_fim_do_hook": True,
         "exclamacao_conta": True, "palavras_chave": [],
     },
+    # Efeitos de edição (ver editing/efeitos.py). Tudo desligado: com as flags
+    # em false o filtergraph é o mesmo de antes de a seção existir.
+    "efeitos": {
+        "zoom": {
+            "ativo": False, "modo": "picos", "fator": 1.08, "duracao_s": 0.6,
+            "intervalo_s": 4.0, "espacamento_minimo_s": 2.0,
+            "maximo_por_clip": 8,
+        },
+        "flash": {
+            "ativo": False, "intensidade": 0.35, "duracao_s": 0.18,
+            "na_abertura": True, "no_fim_do_hook": True,
+        },
+        "vinheta": {"ativo": False, "angulo": 0.6},
+        "barra": {"ativo": False, "altura": 8, "cor": "#FFD400",
+                  "posicao": "base"},
+        "voz": {"ativo": False, "lufs": -16.0},
+        "ducking": {"ativo": False, "limiar": 0.03, "razao": 8.0,
+                    "ataque_ms": 5.0, "liberacao_ms": 250.0},
+        "pad": {"ativo": False, "arquivo": "pad_{categoria}.wav",
+                "volume": 1.0},
+        "teto_sfx_abaixo_da_voz_db": 8.0,
+    },
 }
 
 MODOS_REFRAME = ("corte", "desfoque")
@@ -144,6 +166,7 @@ def validar(config):
 
     _validar_layout(config)
     _validar_sfx(config["sfx"])
+    _validar_efeitos(config["efeitos"])
     return config
 
 
@@ -227,6 +250,70 @@ def _validar_sfx(sfx):
         )
     if not isinstance(sfx.get("palavras_chave"), list):
         raise TemplateInvalido("sfx.palavras_chave precisa ser uma lista")
+
+
+def _numero(secao, nome, chave, minimo=None, maximo=None, exclusivo=False):
+    valor = secao.get(chave)
+    if isinstance(valor, bool) or not isinstance(valor, (int, float)):
+        raise TemplateInvalido(f"efeitos.{nome}.{chave} precisa ser número, veio {valor!r}")
+    if minimo is not None and (valor <= minimo if exclusivo else valor < minimo):
+        raise TemplateInvalido(
+            f"efeitos.{nome}.{chave} precisa ser {'>' if exclusivo else '>='} "
+            f"{minimo}, veio {valor}"
+        )
+    if maximo is not None and valor > maximo:
+        raise TemplateInvalido(f"efeitos.{nome}.{chave} precisa ser <= {maximo}, veio {valor}")
+
+
+def _validar_efeitos(ef):
+    for nome in ("zoom", "flash", "vinheta", "barra", "voz", "ducking", "pad"):
+        secao = ef.get(nome)
+        if not isinstance(secao, dict):
+            raise TemplateInvalido(f"efeitos.{nome} precisa ser um objeto")
+        if not isinstance(secao.get("ativo"), bool):
+            raise TemplateInvalido(
+                f"efeitos.{nome}.ativo precisa ser true ou false, veio {secao.get('ativo')!r}"
+            )
+
+    zoom = ef["zoom"]
+    if zoom["modo"] not in ("picos", "intervalo"):
+        raise TemplateInvalido(
+            f"efeitos.zoom.modo precisa ser 'picos' ou 'intervalo', veio {zoom['modo']!r}"
+        )
+    _numero(zoom, "zoom", "fator", minimo=1.0)
+    _numero(zoom, "zoom", "fator", maximo=1.5)
+    _numero(zoom, "zoom", "duracao_s", minimo=0.0, exclusivo=True)
+    _numero(zoom, "zoom", "intervalo_s", minimo=0.0, exclusivo=True)
+    _numero(zoom, "zoom", "espacamento_minimo_s", minimo=0.0)
+    _numero(zoom, "zoom", "maximo_por_clip", minimo=0)
+
+    flash = ef["flash"]
+    _numero(flash, "flash", "intensidade", minimo=0.0, maximo=1.0)
+    _numero(flash, "flash", "duracao_s", minimo=0.0, exclusivo=True)
+    _numero(ef["vinheta"], "vinheta", "angulo", minimo=0.0, maximo=1.5707)
+    barra = ef["barra"]
+    _numero(barra, "barra", "altura", minimo=1)
+    cor_ass(barra["cor"])
+    if barra["posicao"] not in ("base", "topo"):
+        raise TemplateInvalido(
+            f"efeitos.barra.posicao precisa ser 'base' ou 'topo', veio {barra['posicao']!r}"
+        )
+
+    _numero(ef["voz"], "voz", "lufs", minimo=-40.0, maximo=-5.0)
+    duck = ef["ducking"]
+    _numero(duck, "ducking", "limiar", minimo=0.0, exclusivo=True, maximo=1.0)
+    _numero(duck, "ducking", "razao", minimo=1.0)
+    _numero(duck, "ducking", "ataque_ms", minimo=0.01)
+    _numero(duck, "ducking", "liberacao_ms", minimo=0.01)
+    pad = ef["pad"]
+    _numero(pad, "pad", "volume", minimo=0.0)
+    if "{categoria}" not in str(pad.get("arquivo", "")) and not str(pad.get("arquivo", "")).strip():
+        raise TemplateInvalido("efeitos.pad.arquivo está vazio")
+    valor = ef.get("teto_sfx_abaixo_da_voz_db")
+    if isinstance(valor, bool) or not isinstance(valor, (int, float)) or valor < 0:
+        raise TemplateInvalido(
+            f"efeitos.teto_sfx_abaixo_da_voz_db precisa ser número >= 0, veio {valor!r}"
+        )
 
 
 def carregar(caminho=None):
