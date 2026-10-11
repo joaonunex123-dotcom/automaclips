@@ -141,6 +141,15 @@ def test_detector_quebrado_degrada_com_aviso(template, caplog):
     assert "desligado neste clip" in caplog.text
 
 
+def test_falha_inesperada_do_detector_degrada(template, caplog):
+    config = _config(template)
+
+    def quebra(*a):
+        raise RuntimeError("cv2.error simulado")
+    assert rosto.aplicar(config, "v.mp4", 0, 10, amostrar_fn=quebra) is config
+    assert "falha do detector" in caplog.text
+
+
 def test_sem_rosto_mantem_ancora_fixa(template):
     config = _config(template)
     amostrar = lambda *a: (_amostras([None] * 8), DIM)

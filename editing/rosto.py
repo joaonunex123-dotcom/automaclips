@@ -185,6 +185,9 @@ def aplicar(config, video_path, inicio_s, fim_s, amostrar_fn=None):
     except ErroRosto as e:
         log.warning("Reframe com rosto desligado neste clip: %s", e)
         return config
+    except Exception as e:      # cv2.error, quadro corrompido: nunca derruba o render
+        log.warning("Reframe com rosto desligado neste clip (falha do detector): %r", e)
+        return config
     trilha = planejar(amostras, dimensoes, config)
     if trilha is None:
         log.info("Sem rosto confiável em %s: âncora fixa do template.", video_path)
