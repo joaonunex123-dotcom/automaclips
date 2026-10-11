@@ -32,7 +32,13 @@ PADRAO = {
         "codec_video": "libx264", "preset": "medium", "crf": 20,
         "codec_audio": "aac", "bitrate_audio": "192k",
     },
-    "reframe": {"modo": "corte", "ancora_horizontal": 0.5, "desfoque_sigma": 30},
+    "reframe": {
+        "modo": "corte", "ancora_horizontal": 0.5, "desfoque_sigma": 30,
+        "rosto": {
+            "ativo": False, "amostras_por_s": 2, "zona_morta": 0.12,
+            "transicao_s": 0.6, "max_movimentos": 6, "minimo_deteccoes": 0.3,
+        },
+    },
     "zoom": {"ativo": False, "fator_final": 1.08},
     "legenda": {
         "ativa": True, "fonte": "Arial", "tamanho": 76, "negrito": True,
@@ -115,6 +121,12 @@ def validar(config):
         )
     _exigir_numero(config, "reframe", "ancora_horizontal", minimo=0.0, maximo=1.0)
     _exigir_numero(config, "zoom", "fator_final", minimo=1.0)
+    rosto = config["reframe"].get("rosto") or {}
+    for chave, minimo, maximo in (
+            ("amostras_por_s", 0.1, None), ("zona_morta", 0.0, 1.0),
+            ("transicao_s", 0.0, None), ("max_movimentos", 1, None),
+            ("minimo_deteccoes", 0.0, 1.0)):
+        _exigir_numero({"rosto": rosto}, "rosto", chave, minimo=minimo, maximo=maximo)
 
     for secao in ("legenda", "hook", "watermark"):
         _exigir_numero(config, secao, "tamanho", minimo=1)

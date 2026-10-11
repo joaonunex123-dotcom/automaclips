@@ -26,6 +26,10 @@ soundfile>=0.12.0
 # faixas de vídeo e áudio separadas do YouTube, e a extração do .wav é uma
 # chamada direta a ele.  Windows: winget install Gyan.FFmpeg
 
+# Reframe que segue o rosto (editing/rosto.py; reframe.rosto.ativo). Importado
+# dentro da função: sem ele o corte fixo continua funcionando.
+opencv-python-headless>=4.8.0,<5
+
 # Etapa 5 — publish.
 #
 # O upload para o YouTube usa OAuth, não a chave de API do sourcing: são
