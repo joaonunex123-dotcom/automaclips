@@ -204,3 +204,15 @@ def test_cor_ass_aceita_sem_cerquilha():
 def test_cor_ass_recusa_lixo(ruim):
     with pytest.raises(template_mod.TemplateInvalido):
         template_mod.cor_ass(ruim)
+
+
+def test_rosto_com_valor_impossivel_e_recusado(tmp_path):
+    with pytest.raises(template_mod.TemplateInvalido, match="zona_morta"):
+        template_mod.carregar(
+            _escrever(tmp_path, {"reframe": {"rosto": {"zona_morta": 2}}})
+        )
+
+
+def test_rosto_vem_desligado_por_padrao(tmp_path):
+    config = template_mod.carregar(_escrever(tmp_path, {}))
+    assert config["reframe"]["rosto"]["ativo"] is False

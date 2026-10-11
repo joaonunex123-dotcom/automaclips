@@ -24,6 +24,7 @@ import settings
 from db import repositorio
 from editing import legendas as legendas_mod
 from editing import render as render_mod
+from editing import rosto as rosto_mod
 from editing import sfx as sfx_mod
 from editing import template as template_mod
 from pipeline import transcribe as transcribe_mod
@@ -55,7 +56,7 @@ def _carregar_fontes(linha, carregar_transcricao):
 
 
 def renderizar_clip(conn, linha, config, biblioteca=None, carregar_transcricao=None,
-                    renderizar=None, destino_dir=None):
+                    renderizar=None, destino_dir=None, amostrar_rosto=None):
     """Produz o arquivo de um clip e registra o artefato. Devolve o caminho."""
     carregar_transcricao = carregar_transcricao or transcribe_mod.carregar
     renderizar = renderizar or render_mod.renderizar
@@ -80,8 +81,12 @@ def renderizar_clip(conn, linha, config, biblioteca=None, carregar_transcricao=N
     )
     nome = render_mod.nome_base(linha["video_id"], linha["id"])
 
+    # Reframe que segue o rosto: no-op com reframe.rosto.ativo == false.
+    config_render = rosto_mod.aplicar(
+        config, video_path, inicio, fim, amostrar_fn=amostrar_rosto)
+
     caminho = renderizar(
-        config, video_path, inicio, fim, ass_texto, nome,
+        config_render, video_path, inicio, fim, ass_texto, nome,
         destino_dir=destino_dir, sons=sons,
     )
     repositorio.registrar_render(
