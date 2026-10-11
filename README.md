@@ -363,6 +363,31 @@ Por isso existe `capa.frame_inicial`: o quadro de título dentro dos primeiros
 0,3 s é o que a plataforma tende a pegar. O custo é um flash de pôster no
 começo do clip.
 
+## Modo gráfico (slides, gráficos, tabelas)
+
+O crop 9:16 central joga fora ~68% da largura do 16:9: num gráfico, o eixo e
+metade das barras somem. Com `grafico.ativo: true` o clip detecta os trechos em
+que a fonte é conteúdo (não pessoa) e mostra o quadro **inteiro**, centralizado,
+sobre fundo preenchido, com fade de 0,25 s entre o enquadramento normal e o
+gráfico.
+
+| chave | valores |
+| --- | --- |
+| `grafico.ativo` | `false` (padrão) / `true` |
+| `grafico.fundo` | `"desfoque"` (cópia desfocada da cena) ou `"solido"` (`cor_solida`) |
+| `grafico.transicao_s` | duração do fade (0,05 a 1,0) |
+| `grafico.largura_minima` | 0,70: abaixo disso o recorte tira só a margem vazia e amplia |
+
+O pedido original chamava a chave de `layout.grafico.fundo`; como `layout` já é
+uma string (`full`/`split`) no template, a seção ficou em `grafico`.
+
+Detecção local (sem chamada paga), sobre quadros amostrados a 2/s: sem rosto,
+fundo plano, poucas cores dominantes e linhas retas alinhadas aos eixos —
+os quatro juntos. Calibrada com um gráfico sintético contra 107 quadros de
+uma reportagem real (nenhum falso positivo). Sem detecção confiável o clip sai
+como antes. Um modelo de visão não está ligado: o `llm_client` não aceita
+imagem; `grafico.detectar(..., confirmar=...)` é o gancho.
+
 ## Efeitos sonoros
 
 Desligados por padrão: dependem de arquivos de áudio que não vêm no

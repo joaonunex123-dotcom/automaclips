@@ -42,15 +42,15 @@ def nome_base(video_id, clip_id):
     return _SEGURO.sub("_", f"{video_id}_{clip_id}")
 
 
-def filtro_reframe(config, altura=None):
+def filtro_reframe(config, altura=None, entrada="[0:v]", saida="[vr]"):
     """16:9 -> 9:16. Devolve o trecho do grafo que sai em [vr].
 
     `altura` sobrepõe a de saída: no layout split o clip ocupa só a parte de
     cima, e o reframe passa a produzir largura x altura_do_clip.
     """
-    saida = config["saida"]
-    largura = int(saida["largura"])
-    altura = int(altura) if altura else int(saida["altura"])
+    dims = config["saida"]
+    largura = int(dims["largura"])
+    altura = int(altura) if altura else int(dims["altura"])
     reframe = config["reframe"]
     proporcao = largura / altura
 
@@ -60,11 +60,11 @@ def filtro_reframe(config, altura=None):
         # É o formato que preserva a composição original do vídeo — útil quando
         # o enquadramento tem informação nas duas bordas.
         return (
-            "[0:v]split=2[bg][fg];"
+            f"{entrada}split=2[bg][fg];"
             f"[bg]scale={largura}:{altura}:force_original_aspect_ratio=increase,"
             f"crop={largura}:{altura},gblur=sigma={sigma}[bgb];"
             f"[fg]scale={largura}:{altura}:force_original_aspect_ratio=decrease[fgs];"
-            "[bgb][fgs]overlay=(W-w)/2:(H-h)/2,setsar=1[vr];"
+            f"[bgb][fgs]overlay=(W-w)/2:(H-h)/2,setsar=1{saida};"
         )
 
     ancora = reframe["ancora_horizontal"]
@@ -72,9 +72,9 @@ def filtro_reframe(config, altura=None):
     # limitando pelos DOIS lados. Limitar só pela altura distorceria um vídeo
     # que já viesse mais alto que 9:16 (um Short republicado, por exemplo).
     return (
-        f"[0:v]crop=w='min(iw,ih*{proporcao})':h='min(ih,iw/{proporcao})':"
+        f"{entrada}crop=w='min(iw,ih*{proporcao})':h='min(ih,iw/{proporcao})':"
         f"x='(iw-ow)*{ancora}':y='(ih-oh)/2',"
-        f"scale={largura}:{altura},setsar=1[vr];"
+        f"scale={largura}:{altura},setsar=1{saida};"
     )
 
 
@@ -194,7 +194,21 @@ def filtergraph(config, ass_nome, duracao_s, sons=None, filler=None,
         from editing import layout as layout_mod
         altura_clip = layout_mod.alturas(config)[0]
 
-    grafo = filtro_reframe(config, altura_clip)
+    # Modo gráfico: trechos em que a fonte é slide/gráfico/tabela aparecem
+    # INTEIROS (fit) sobre fundo preenchido, com fade de alfa por cima do
+    # reframe. Sem segmento, nada abaixo acrescenta uma letra ao grafo.
+    segmentos = list((efeitos or {}).get("grafico") or [])
+    if segmentos:
+        from editing import grafico as grafico_mod
+        grafo = grafico_mod.prefixo_split(len(segmentos))
+        grafo += filtro_reframe(config, altura_clip, entrada="[gorig]",
+                                saida="[vrbase]")
+        for i, seg in enumerate(segmentos):
+            grafo += grafico_mod.filtro_segmento(config, i, seg, altura_clip,
+                                                 duracao_s)
+        grafo += grafico_mod.filtro_composicao("[vrbase]", "[vr]", len(segmentos))
+    else:
+        grafo = filtro_reframe(config, altura_clip)
     zoom = filtro_zoom(config, duracao_s, altura_clip)
     grafo += zoom
     entrada = "[vz]" if zoom else "[vr]"

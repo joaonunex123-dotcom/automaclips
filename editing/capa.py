@@ -152,15 +152,16 @@ def escolher_melhor(pontuados):
 
 # --- amostragem ---------------------------------------------------------------
 
-def amostrar(video_path, inicio_s, fim_s, ffmpeg="ffmpeg", executar=None):
-    """Quadros BGR pequenos do trecho, a FPS_AMOSTRA, via um pipe do ffmpeg."""
+def amostrar(video_path, inicio_s, fim_s, ffmpeg="ffmpeg", executar=None,
+             fps=None):
+    """Quadros BGR pequenos do trecho (padrão FPS_AMOSTRA), via um pipe."""
     import numpy as np
 
     executar = executar or subprocess.run
     duracao = float(fim_s) - float(inicio_s)
     if duracao <= 0:
         return []
-    fps = min(FPS_AMOSTRA, MAX_AMOSTRAS / duracao)
+    fps = min(float(fps or FPS_AMOSTRA), MAX_AMOSTRAS / duracao)
     r = executar(
         [ffmpeg, "-hide_banner", "-loglevel", "error", "-ss", f"{inicio_s:.3f}",
          "-t", f"{duracao:.3f}", "-i", video_path, "-an",

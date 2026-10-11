@@ -76,6 +76,13 @@ PADRAO = {
         "caixa_cor": "#000000B0", "contorno_espessura": 8,
         "frame_inicial": {"ativo": False, "duracao_s": 0.3},
     },
+    # Modo gráfico (ver editing/grafico.py): slide/gráfico/tabela da fonte
+    # aparece inteiro, sobre fundo preenchido, em vez do crop 9:16 central.
+    "grafico": {
+        "ativo": False, "fundo": "desfoque", "cor_solida": "#101418",
+        "desfoque_sigma": 30, "transicao_s": 0.25, "min_duracao_s": 1.5,
+        "maximo_por_clip": 3, "amostras_por_s": 2.0, "largura_minima": 0.70,
+    },
     # Efeitos de edição (ver editing/efeitos.py). Tudo desligado: com as flags
     # em false o filtergraph é o mesmo de antes de a seção existir.
     "efeitos": {
@@ -172,6 +179,7 @@ def validar(config):
 
     _validar_layout(config)
     _validar_capa(config["capa"])
+    _validar_grafico(config["grafico"])
     _validar_sfx(config["sfx"])
     _validar_efeitos(config["efeitos"])
     return config
@@ -252,6 +260,29 @@ def _validar_capa(capa):
             or not 0.0 < dur <= 1.0:
         raise TemplateInvalido(
             f"capa.frame_inicial.duracao_s precisa estar em (0, 1], veio {dur!r}")
+
+
+def _validar_grafico(g):
+    if not isinstance(g.get("ativo"), bool):
+        raise TemplateInvalido(
+            f"grafico.ativo precisa ser true ou false, veio {g.get('ativo')!r}")
+    if g.get("fundo") not in ("desfoque", "solido"):
+        raise TemplateInvalido(
+            f"grafico.fundo precisa ser 'desfoque' ou 'solido', "
+            f"veio {g.get('fundo')!r}")
+    cor_ass(g["cor_solida"])
+    for chave, minimo, maximo in (
+            ("desfoque_sigma", 0.0, 200.0), ("transicao_s", 0.05, 1.0),
+            ("min_duracao_s", 0.5, 60.0), ("maximo_por_clip", 1, 10),
+            ("amostras_por_s", 0.5, 8.0), ("largura_minima", 0.1, 1.0)):
+        valor = g.get(chave)
+        if isinstance(valor, bool) or not isinstance(valor, (int, float)):
+            raise TemplateInvalido(
+                f"grafico.{chave} precisa ser número, veio {valor!r}")
+        if valor < minimo or valor > maximo:
+            raise TemplateInvalido(
+                f"grafico.{chave} precisa estar em [{minimo}, {maximo}], "
+                f"veio {valor}")
 
 
 def _validar_sfx(sfx):

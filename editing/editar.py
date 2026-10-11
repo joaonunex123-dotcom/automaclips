@@ -24,6 +24,7 @@ import settings
 from db import repositorio
 from editing import capa as capa_mod
 from editing import efeitos as efeitos_mod
+from editing import grafico as grafico_mod
 from editing import layout as layout_mod
 from editing import legendas as legendas_mod
 from editing import render as render_mod
@@ -59,7 +60,7 @@ def _carregar_fontes(linha, carregar_transcricao):
 
 def renderizar_clip(conn, linha, config, biblioteca=None, carregar_transcricao=None,
                     renderizar=None, destino_dir=None, planejar_filler=None,
-                    gerar_capa=None):
+                    gerar_capa=None, detectar_grafico=None):
     """Produz o arquivo de um clip e registra o artefato. Devolve o caminho."""
     carregar_transcricao = carregar_transcricao or transcribe_mod.carregar
     renderizar = renderizar or render_mod.renderizar
@@ -117,6 +118,10 @@ def renderizar_clip(conn, linha, config, biblioteca=None, carregar_transcricao=N
             "caminho": capa_info["vertical"],
             "duracao_s": float(frame["duracao_s"]),
         }
+    segmentos = _segmentos_grafico(config, config_layout, plano, video_path,
+                                   inicio, fim, detectar_grafico)
+    if segmentos:
+        extras_efeitos["grafico"] = segmentos
     if extras_efeitos:
         extras["efeitos"] = extras_efeitos
 
@@ -132,6 +137,21 @@ def renderizar_clip(conn, linha, config, biblioteca=None, carregar_transcricao=N
         capa_path=(capa_info or {}).get("vertical", ""),
     )
     return caminho
+
+
+def _segmentos_grafico(config, config_layout, filler, video_path, inicio, fim,
+                       detectar_grafico=None):
+    """Segmentos do modo gráfico com geometria; [] se desligado/sem detecção."""
+    if not config.get("grafico", {}).get("ativo"):
+        return []
+    detectar_grafico = detectar_grafico or grafico_mod.detectar
+    altura = layout_mod.alturas(config)[0] if filler else None
+    try:
+        brutos = detectar_grafico(video_path, inicio, fim, config)
+        return grafico_mod.planejar(video_path, brutos, config, altura)
+    except Exception as e:
+        log.warning("Modo gráfico indisponível (%s); clip sai como antes.", e)
+        return []
 
 
 def _gerar_capa(config, linha, video_path, inicio, fim, nome, destino_dir,

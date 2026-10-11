@@ -13,7 +13,7 @@
     "numérico do ASS: 1-3 embaixo, 4-6 no meio, 7-9 em cima."
   ],
 
-  "versao": "3",
+  "versao": "4",
 
   "saida": {
     "largura": 1080,
@@ -80,6 +80,27 @@
     "caixa_cor": "#000000B0",
     "contorno_espessura": 8,
     "frame_inicial": {"ativo": false, "duracao_s": 0.3}
+  },
+
+  "grafico": {
+    "_comentario": [
+      "Modo gráfico. Nos trechos em que a fonte mostra gráfico, tabela ou slide",
+      "(sem rosto, fundo plano, poucas cores, linhas retas) o conteúdo aparece",
+      "INTEIRO, centralizado, em vez do crop 9:16. Desligado por padrão.",
+      "  fundo   'desfoque' = cópia desfocada da própria cena; 'solido' = cor_solida",
+      "  transicao_s   fade entre o enquadramento normal e o gráfico",
+      "  largura_minima   fração de 1080 px; abaixo disso o recorte tira só a",
+      "                   margem vazia e amplia, sem cortar o gráfico"
+    ],
+    "ativo": false,
+    "fundo": "desfoque",
+    "cor_solida": "#101418",
+    "desfoque_sigma": 30,
+    "transicao_s": 0.25,
+    "min_duracao_s": 1.5,
+    "maximo_por_clip": 3,
+    "amostras_por_s": 2.0,
+    "largura_minima": 0.70
   },
 
   "zoom": {
