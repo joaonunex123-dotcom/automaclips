@@ -13,7 +13,7 @@
     "numérico do ASS: 1-3 embaixo, 4-6 no meio, 7-9 em cima."
   ],
 
-  "versao": "4",
+  "versao": "5",
 
   "saida": {
     "largura": 1080,
@@ -226,6 +226,17 @@
       "  vinheta  escurece as bordas",
       "  barra    barra fina de progresso (base ou topo)",
       "",
+      "Transições (planejadas juntas: no máximo 1 a cada espacamento_minimo_s,",
+      "e variando o tipo; zoom = zoom punch, flash = clarão, já descritos acima)",
+      "  shutter  cortina de lâminas horizontais que fecham e reabrem",
+      "  iris     máscara circular que fecha e reabre",
+      "  whip_pan borrão horizontal (movimento de câmera)",
+      "  glitch   separação RGB leve + saturação",
+      "  intensidade 0..1; duracao_s entre 0,15 e 0,4. Gatilhos: virada do hook,",
+      "  entrada/saída de gráfico e picos de energia. Ligar qualquer um dos",
+      "  quatro novos (ou cadencia.ativo) faz o planejador decidir também os",
+      "  instantes de flash e zoom.",
+      "",
       "Áudio (sons sintetizados por editing/gerar_sfx.py, nada externo)",
       "  voz      normaliza a fala do clip para `lufs`",
       "  ducking  efeitos e pad abaixam quando a voz fala (sidechain)",
@@ -253,6 +264,11 @@
     },
     "vinheta": {"ativo": false, "angulo": 0.6},
     "barra": {"ativo": false, "altura": 8, "cor": "#FFD400", "posicao": "base"},
+    "shutter":  {"ativo": false, "intensidade": 0.85, "duracao_s": 0.30},
+    "iris":     {"ativo": false, "intensidade": 0.80, "duracao_s": 0.40},
+    "whip_pan": {"ativo": false, "intensidade": 0.60, "duracao_s": 0.30},
+    "glitch":   {"ativo": false, "intensidade": 0.50, "duracao_s": 0.20},
+    "cadencia": {"ativo": false, "espacamento_minimo_s": 4.0, "maximo_por_clip": 6},
     "voz": {"ativo": false, "lufs": -16.0},
     "ducking": {
       "ativo": false,

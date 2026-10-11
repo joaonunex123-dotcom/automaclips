@@ -122,6 +122,9 @@ def renderizar_clip(conn, linha, config, biblioteca=None, carregar_transcricao=N
                                    inicio, fim, detectar_grafico)
     if segmentos:
         extras_efeitos["grafico"] = segmentos
+    if efeitos_mod.cadencia_governa(config):
+        extras_efeitos["transicoes"] = efeitos_mod.planejar_transicoes(
+            config, duracao, picos=picos, segmentos_grafico=segmentos)
     if extras_efeitos:
         extras["efeitos"] = extras_efeitos
 

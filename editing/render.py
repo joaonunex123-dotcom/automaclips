@@ -213,14 +213,20 @@ def filtergraph(config, ass_nome, duracao_s, sons=None, filler=None,
     grafo += zoom
     entrada = "[vz]" if zoom else "[vr]"
     picos = (efeitos or {}).get("picos")
-    punch = efeitos_mod.filtro_punch(config, duracao_s, entrada, altura_clip, picos)
+    eventos = (efeitos or {}).get("transicoes")
+    zoom_instantes = None
+    if eventos is not None and efeitos_mod.cadencia_governa(config):
+        zoom_instantes = efeitos_mod.instantes_do_tipo(eventos, "zoom")
+    punch = efeitos_mod.filtro_punch(config, duracao_s, entrada, altura_clip,
+                                     picos, instantes=zoom_instantes)
     if punch:
         grafo += punch
         entrada = "[vp]"
     if filler:
         grafo += filtro_split(config, 1 + len(sons or []), entrada)
         entrada = "[vs]"
-    acabamento, entrada = efeitos_mod.filtro_acabamento(config, duracao_s, entrada)
+    acabamento, entrada = efeitos_mod.filtro_acabamento(
+        config, duracao_s, entrada, eventos=eventos)
     grafo += acabamento
     capa_frame = (efeitos or {}).get("capa_frame")
     if capa_frame:

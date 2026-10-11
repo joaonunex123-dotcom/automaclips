@@ -98,6 +98,13 @@ PADRAO = {
         "vinheta": {"ativo": False, "angulo": 0.6},
         "barra": {"ativo": False, "altura": 8, "cor": "#FFD400",
                   "posicao": "base"},
+        # Transições novas (planejadas por efeitos.planejar_transicoes).
+        "shutter": {"ativo": False, "intensidade": 0.85, "duracao_s": 0.30},
+        "iris": {"ativo": False, "intensidade": 0.80, "duracao_s": 0.40},
+        "whip_pan": {"ativo": False, "intensidade": 0.60, "duracao_s": 0.30},
+        "glitch": {"ativo": False, "intensidade": 0.50, "duracao_s": 0.20},
+        "cadencia": {"ativo": False, "espacamento_minimo_s": 4.0,
+                     "maximo_por_clip": 6},
         "voz": {"ativo": False, "lufs": -16.0},
         "ducking": {"ativo": False, "limiar": 0.03, "razao": 8.0,
                     "ataque_ms": 5.0, "liberacao_ms": 250.0},
@@ -331,7 +338,8 @@ def _numero(secao, nome, chave, minimo=None, maximo=None, exclusivo=False):
 
 
 def _validar_efeitos(ef):
-    for nome in ("zoom", "flash", "vinheta", "barra", "voz", "ducking", "pad"):
+    for nome in ("zoom", "flash", "vinheta", "barra", "voz", "ducking", "pad",
+                 "shutter", "iris", "whip_pan", "glitch", "cadencia"):
         secao = ef.get(nome)
         if not isinstance(secao, dict):
             raise TemplateInvalido(f"efeitos.{nome} precisa ser um objeto")
@@ -363,6 +371,12 @@ def _validar_efeitos(ef):
         raise TemplateInvalido(
             f"efeitos.barra.posicao precisa ser 'base' ou 'topo', veio {barra['posicao']!r}"
         )
+
+    for nome in ("shutter", "iris", "whip_pan", "glitch"):
+        _numero(ef[nome], nome, "intensidade", minimo=0.0, maximo=1.0)
+        _numero(ef[nome], nome, "duracao_s", minimo=0.15, maximo=0.4)
+    _numero(ef["cadencia"], "cadencia", "espacamento_minimo_s", minimo=0.5)
+    _numero(ef["cadencia"], "cadencia", "maximo_por_clip", minimo=0)
 
     _numero(ef["voz"], "voz", "lufs", minimo=-40.0, maximo=-5.0)
     duck = ef["ducking"]

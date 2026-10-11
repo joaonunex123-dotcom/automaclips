@@ -388,6 +388,35 @@ uma reportagem real (nenhum falso positivo). Sem detecção confiável o clip sa
 como antes. Um modelo de visão não está ligado: o `llm_client` não aceita
 imagem; `grafico.detectar(..., confirmar=...)` é o gancho.
 
+## Biblioteca de transições
+
+Tudo gerado por filtros nativos do ffmpeg (nada externo) e **desligado por
+padrão**. Cada efeito é `efeitos.<nome>` no `template_config.json`, com
+`ativo`, `intensidade` (0..1) e `duracao_s` (0,15 a 0,4 s):
+
+| efeito | o que é | notas |
+| --- | --- | --- |
+| `shutter` | cortina de 6 lâminas horizontais que fecham e reabrem | `drawbox` por lâmina |
+| `iris` | máscara circular que fecha e reabre | máscara em 1/10 da resolução, com alfa |
+| `whip_pan` | borrão horizontal de câmera (3 degraus) | `avgblur` |
+| `glitch` | franja de cor + saturação, leve | `chromashift` (em YUV) |
+| `flash` | clarão que decai | já existia |
+| `zoom` | punch-in (zoom punch) | já existia; `fator` faz o papel de intensidade |
+
+`flash` e `zoom` foram **reaproveitados**, não duplicados. Ligar qualquer
+transição nova (ou `efeitos.cadencia.ativo`) faz o planejador decidir também os
+instantes deles, para valer a regra: **no máximo 1 efeito a cada 4 s**
+(`cadencia.espacamento_minimo_s`) e **variando o tipo** (nunca o mesmo em
+seguida quando há alternativa). Gatilhos, por prioridade: abertura (só
+`flash`) e virada do hook; entrada de gráfico; picos de energia; saída de
+gráfico. Com só `flash`/`zoom` ligados e a cadência desligada vale o
+comportamento antigo, byte a byte.
+
+Duas armadilhas de custo, medidas: `rgbashift` força o grafo inteiro por RGB e
+levou o render de um clip de 30 s de 10 s para 46 s — o glitch usa
+`chromashift`; e um `geq` por pixel em 1080x1920 custava +9 s — a íris é uma
+máscara em baixa resolução ampliada com bicúbico.
+
 ## Efeitos sonoros
 
 Desligados por padrão: dependem de arquivos de áudio que não vêm no
