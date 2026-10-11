@@ -51,3 +51,18 @@ obrigatória), ou material licenciado a você. Vídeo de gameplay, parkour ou
 "satisfying" baixado de terceiros costuma ter direitos reservados e pode gerar
 bloqueio de monetização, strike ou remoção. A responsabilidade pelo que entra
 nesta pasta é sua; o repositório não verifica licença nenhuma.
+
+## Preenchimento gerado por código
+
+Para não depender de material de terceiros, `tools/gerar_filler.py` desenha
+quatro categorias 100% procedurais (numpy + OpenCV -> ffmpeg), com semente
+fixa e loop sem emenda:
+
+```
+python tools/gerar_filler.py            # slime, satisfatorio, parkour, asmr_geometrico
+python tools/gerar_filler.py slime --teste   # 4 s, para conferir rápido
+```
+
+Cada pasta recebe `filler.mp4` (60 s, 30 fps, 1080x768, sem áudio) e um
+`LICENCA.txt`. Os arquivos continuam ignorados pelo git: versiona-se o gerador,
+e qualquer máquina reproduz o mesmo vídeo com a mesma semente.

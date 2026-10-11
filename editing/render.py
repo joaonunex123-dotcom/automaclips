@@ -211,7 +211,9 @@ def filtergraph(config, ass_nome, duracao_s, sons=None, filler=None,
     grafo += f"{entrada}ass={ass_nome}[vout]"
 
     if efeitos_mod.audio_ativo(config):
-        audio = efeitos_mod.cadeia_audio(config, sons, duracao_s)
+        audio = efeitos_mod.cadeia_audio(
+            config, sons, duracao_s,
+            voz_medida=(efeitos or {}).get("voz_medida"))
     else:
         audio = cadeia_audio(sons)
     if audio:
@@ -278,6 +280,7 @@ def renderizar(config, video_path, inicio_s, fim_s, ass_texto, nome, destino_dir
                executar=None, caminho_ffmpeg=None, sons=None, filler=None,
                efeitos=None):
     """Escreve o .ass, roda o ffmpeg e devolve o caminho do .mp4."""
+    from editing import efeitos as efeitos_mod
     from pipeline.download import _garantir_ffmpeg
 
     if not os.path.exists(video_path):
@@ -294,6 +297,11 @@ def renderizar(config, video_path, inicio_s, fim_s, ass_texto, nome, destino_dir
 
     saida_path = os.path.join(destino_dir, f"{nome}.mp4")
     duracao = max(0.0, float(fim_s) - float(inicio_s))
+    if efeitos_mod.audio_ativo(config):
+        medida = efeitos_mod.medir_voz(config, video_path, inicio_s, duracao,
+                                       ffmpeg, executar)
+        if medida:
+            efeitos = {**(efeitos or {}), "voz_medida": medida}
     argumentos = comando(
         config, video_path, inicio_s, duracao, ass_nome, saida_path, ffmpeg,
         sons=sons, filler=filler, efeitos=efeitos,

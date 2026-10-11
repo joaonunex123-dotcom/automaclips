@@ -250,6 +250,55 @@ def plano_pad(config, categoria, base_dir=None):
     }]
 
 
+def parse_loudnorm(stderr):
+    """measured_* do JSON que o loudnorm imprime no stderr, ou None."""
+    import json
+    import re
+    blocos = re.findall(r"\{[^{}]*\}", stderr or "", re.S)
+    for texto in reversed(blocos):
+        try:
+            dados = json.loads(texto)
+            return {
+                "I": float(dados["input_i"]), "TP": float(dados["input_tp"]),
+                "LRA": float(dados["input_lra"]),
+                "thresh": float(dados["input_thresh"]),
+                "offset": float(dados["target_offset"]),
+            }
+        except (ValueError, KeyError):
+            continue
+    return None
+
+
+def medir_voz(config, video_path, inicio_s, duracao_s, ffmpeg="ffmpeg",
+              executar=None):
+    """Primeira passada do loudnorm: mede a fala do trecho (só áudio, rápido).
+
+    A passada única é dinâmica e costuma ficar ~1 LU abaixo do alvo; com a
+    medição, a segunda passada aplica um ganho linear exato. Qualquer falha
+    devolve None e o render cai para a passada única.
+    """
+    if not _ativo(config, "voz"):
+        return None
+    import subprocess
+    executar = executar or subprocess.run
+    alvo = float(config["efeitos"]["voz"]["lufs"])
+    try:
+        r = executar(
+            [ffmpeg, "-hide_banner", "-nostats", "-ss", f"{inicio_s:.3f}",
+             "-t", f"{duracao_s:.3f}", "-i", video_path, "-vn",
+             "-af", f"loudnorm=I={alvo:g}:TP=-1.5:LRA=11:print_format=json",
+             "-f", "null", "-"],
+            capture_output=True, text=True,
+        )
+    except OSError as e:
+        log.warning("Medição da voz falhou (%s); loudnorm de uma passada.", e)
+        return None
+    medida = parse_loudnorm(r.stderr)
+    if medida is None:
+        log.warning("Sem medição da voz; loudnorm de uma passada.")
+    return medida
+
+
 def verificar_pads(config, categorias, base_dir=None):
     """Falha uma vez, antes da fila, se faltar o pad de alguma categoria."""
     if not _ativo(config, "pad"):
@@ -265,7 +314,7 @@ def verificar_pads(config, categorias, base_dir=None):
         )
 
 
-def cadeia_audio(config, sons, duracao_s, medir=None):
+def cadeia_audio(config, sons, duracao_s, medir=None, voz_medida=None):
     """Grafo de áudio com efeitos ativos. '' quando não há o que fazer.
 
     Entradas: [0:a] é a voz; sons[i] é a entrada [i+1:a] (efeitos e pad). Voz
@@ -282,8 +331,16 @@ def cadeia_audio(config, sons, duracao_s, medir=None):
 
     partes = []
     if _ativo(config, "voz"):
+        medidas = ""
+        if voz_medida:      # segunda passada: ganho linear sobre a medição
+            medidas = (
+                f":measured_I={voz_medida['I']:g}:measured_TP={voz_medida['TP']:g}"
+                f":measured_LRA={voz_medida['LRA']:g}"
+                f":measured_thresh={voz_medida['thresh']:g}"
+                f":offset={voz_medida['offset']:g}:linear=true"
+            )
         partes.append(
-            f"[0:a]loudnorm=I={voz_lufs:g}:TP=-1.5:LRA=11,"
+            f"[0:a]loudnorm=I={voz_lufs:g}:TP=-1.5:LRA=11{medidas},"
             f"aresample={taxa}[voz0]"
         )
     else:

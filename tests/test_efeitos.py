@@ -275,3 +275,59 @@ def test_comando_poe_stream_loop_no_pad_e_mapeia_aout(template, tmp_path):
     # o filler continua sendo a ÚLTIMA entrada, com o índice deslocado pelo pad.
     grafo = args[args.index("-filter_complex") + 1]
     assert "[3:v]fps=30" in grafo
+
+
+# --- loudnorm em duas passadas -------------------------------------------------
+
+SAIDA_LOUDNORM = """
+[Parsed_loudnorm_0 @ 0x1] 
+{
+	"input_i" : "-23.41",
+	"input_tp" : "-6.20",
+	"input_lra" : "5.10",
+	"input_thresh" : "-33.80",
+	"output_i" : "-16.90",
+	"target_offset" : "0.90"
+}
+"""
+
+
+def test_parse_loudnorm_le_o_json_do_stderr():
+    m = ef.parse_loudnorm("ruido\n" + SAIDA_LOUDNORM)
+    assert m == {"I": -23.41, "TP": -6.2, "LRA": 5.1, "thresh": -33.8,
+                 "offset": 0.9}
+    assert ef.parse_loudnorm("sem json") is None
+
+
+def test_medir_voz_chama_so_o_audio_e_devolve_a_medida(template):
+    config = _com(template, voz={"ativo": True})
+    chamadas = []
+
+    class R:
+        stderr = SAIDA_LOUDNORM
+
+    def falso(args, **kw):
+        chamadas.append(args)
+        return R()
+
+    m = ef.medir_voz(config, "/v.mp4", 75.0, 30.0, executar=falso)
+    assert m["I"] == -23.41
+    args = chamadas[0]
+    assert "-vn" in args and "print_format=json" in " ".join(args)
+    assert args[args.index("-ss") + 1] == "75.000"
+
+
+def test_medir_voz_desligada_nao_roda_nada(template):
+    def falso(*a, **k):
+        raise AssertionError("não devia rodar")
+    assert ef.medir_voz(template, "/v.mp4", 0, 10, executar=falso) is None
+
+
+def test_segunda_passada_aplica_ganho_linear(template):
+    config = _com(template, voz={"ativo": True})
+    medida = {"I": -23.4, "TP": -6.2, "LRA": 5.1, "thresh": -33.8, "offset": 0.9}
+    grafo = ef.cadeia_audio(config, [], 20.0, voz_medida=medida)
+    assert "measured_I=-23.4:measured_TP=-6.2:measured_LRA=5.1" in grafo
+    assert "measured_thresh=-33.8:offset=0.9:linear=true" in grafo
+    # sem medida continua a passada única
+    assert "measured_I" not in ef.cadeia_audio(config, [], 20.0)
