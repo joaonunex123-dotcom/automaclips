@@ -339,6 +339,30 @@ Os preenchimentos são arquivos seus em `assets/filler/<categoria>/` — o siste
 não baixa nada, e categoria vazia só desativa a variante (com log). Formato e
 aviso de licença: [assets/filler/README.md](assets/filler/README.md).
 
+## Capa do clip
+
+Desligada por padrão (`capa.ativa: false` no `template_config.json`). Ligada,
+cada clip ganha uma pasta `<nome>_capa/` ao lado do `.mp4` com
+`capa_1080x1920.png` (vertical) e `capa_1280x720.png` (horizontal): o melhor
+quadro do trecho com o título curto em fonte grande, sobre uma caixa escura.
+
+O quadro é pontuado, não sorteado — nitidez (variância do Laplaciano), rosto
+(OpenCV, Haar), brilho aceitável e penalidade para quadro de corte. Sem OpenCV
+degrada para nitidez + brilho; sem amostragem usa o meio do trecho. Falha na
+capa nunca derruba o render. O caminho vertical fica em `renders.capa_path`.
+
+| chave | efeito |
+| --- | --- |
+| `capa.ativa` | gera os PNGs ao lado do clip (o vídeo não muda) |
+| `capa.frame_inicial.ativo` | põe o quadro de título nos primeiros `duracao_s` (0,3 s) **do vídeo** |
+| `YOUTUBE_ENVIAR_CAPA=true` (.env) | depois do upload chama `thumbnails.set` (50 unidades de quota) |
+
+**Limitação:** o YouTube costuma ignorar capa personalizada em Shorts — a shelf
+usa um quadro do próprio vídeo — e `thumbnails.set` exige canal verificado.
+Por isso existe `capa.frame_inicial`: o quadro de título dentro dos primeiros
+0,3 s é o que a plataforma tende a pegar. O custo é um flash de pôster no
+começo do clip.
+
 ## Efeitos sonoros
 
 Desligados por padrão: dependem de arquivos de áudio que não vêm no

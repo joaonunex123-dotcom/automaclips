@@ -22,6 +22,7 @@ import sys
 
 import settings
 from db import repositorio
+from editing import capa as capa_mod
 from editing import efeitos as efeitos_mod
 from editing import layout as layout_mod
 from editing import legendas as legendas_mod
@@ -57,7 +58,8 @@ def _carregar_fontes(linha, carregar_transcricao):
 
 
 def renderizar_clip(conn, linha, config, biblioteca=None, carregar_transcricao=None,
-                    renderizar=None, destino_dir=None, planejar_filler=None):
+                    renderizar=None, destino_dir=None, planejar_filler=None,
+                    gerar_capa=None):
     """Produz o arquivo de um clip e registra o artefato. Devolve o caminho."""
     carregar_transcricao = carregar_transcricao or transcribe_mod.carregar
     renderizar = renderizar or render_mod.renderizar
@@ -99,10 +101,24 @@ def renderizar_clip(conn, linha, config, biblioteca=None, carregar_transcricao=N
         extras["filler"] = plano
     # Efeitos de edição: só entram na chamada quando alguma flag está ligada,
     # então com a seção desligada o renderizador é chamado como antes.
+    extras_efeitos = {}
     if efeitos_mod.algum_ativo(config):
         sons = list(sons) + efeitos_mod.plano_pad(
             config, layout_mod.separar(variante)[1] or layout_mod.FULL)
-        extras["efeitos"] = {"picos": list(picos or [])}
+        extras_efeitos["picos"] = list(picos or [])
+
+    # Capa: gerada ANTES do render porque o quadro de título entra no vídeo.
+    # Falha aqui nunca derruba o clip — a capa é acessório.
+    capa_info = _gerar_capa(config, linha, video_path, inicio, fim, nome,
+                            destino_dir, gerar_capa)
+    frame = config.get("capa", {}).get("frame_inicial", {})
+    if capa_info and frame.get("ativo"):
+        extras_efeitos["capa_frame"] = {
+            "caminho": capa_info["vertical"],
+            "duracao_s": float(frame["duracao_s"]),
+        }
+    if extras_efeitos:
+        extras["efeitos"] = extras_efeitos
 
     caminho = renderizar(
         config_layout, video_path, inicio, fim, ass_texto, nome,
@@ -113,8 +129,27 @@ def renderizar_clip(conn, linha, config, biblioteca=None, carregar_transcricao=N
         template_versao=str(config.get("versao", "")),
         duracao_s=duracao,
         variante=variante,
+        capa_path=(capa_info or {}).get("vertical", ""),
     )
     return caminho
+
+
+def _gerar_capa(config, linha, video_path, inicio, fim, nome, destino_dir,
+                gerar_capa=None):
+    """Dict da capa, ou None (desligada ou falhou — nunca levanta)."""
+    cfg = config.get("capa", {})
+    if not (cfg.get("ativa") or cfg.get("frame_inicial", {}).get("ativo")):
+        return None
+    gerar_capa = gerar_capa or capa_mod.gerar
+    destino = destino_dir or settings.RENDER_DIR
+    try:
+        os.makedirs(destino, exist_ok=True)
+        return gerar_capa(config, video_path, inicio, fim,
+                          capa_mod.titulo_do_clip(linha), destino, nome)
+    except Exception as e:
+        log.warning("Capa do clip %s falhou (%s); segue sem ela.",
+                    linha["id"], e)
+        return None
 
 
 def renderizar_fila(conn, limite=None, config=None, biblioteca=None, **injecoes):

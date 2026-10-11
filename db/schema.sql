@@ -280,7 +280,9 @@ CREATE TABLE IF NOT EXISTS renders (
     renderizado_em  TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     -- Layout A/B: 'full' ou 'split:<categoria>' (editing/layout.py). Um clip
     -- tem uma variante só; é a que a etapa 7 compara.
-    variante        TEXT NOT NULL DEFAULT 'full'
+    variante        TEXT NOT NULL DEFAULT 'full',
+    -- Capa (thumbnail) vertical do clip, ao lado do .mp4. Vazio = sem capa.
+    capa_path       TEXT NOT NULL DEFAULT ''
 );
 
 -- ============================================================================

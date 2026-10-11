@@ -70,6 +70,12 @@ PADRAO = {
         "na_abertura": True, "no_fim_do_hook": True,
         "exclamacao_conta": True, "palavras_chave": [],
     },
+    # Capa (thumbnail) do clip e quadro de título nos primeiros instantes.
+    "capa": {
+        "ativa": False, "fonte": "Arial", "tamanho_max": 130, "cor": "#FFFFFF",
+        "caixa_cor": "#000000B0", "contorno_espessura": 8,
+        "frame_inicial": {"ativo": False, "duracao_s": 0.3},
+    },
     # Efeitos de edição (ver editing/efeitos.py). Tudo desligado: com as flags
     # em false o filtergraph é o mesmo de antes de a seção existir.
     "efeitos": {
@@ -165,6 +171,7 @@ def validar(config):
         raise TemplateInvalido("watermark.ativo mas watermark.texto está vazio")
 
     _validar_layout(config)
+    _validar_capa(config["capa"])
     _validar_sfx(config["sfx"])
     _validar_efeitos(config["efeitos"])
     return config
@@ -218,6 +225,33 @@ def _validar_layout(config):
         raise TemplateInvalido("variantes.pesos: todos os pesos são zero")
     if layout == "split" and not pesos and not split["categoria"]:
         raise TemplateInvalido("layout 'split' exige split.categoria")
+
+
+def _validar_capa(capa):
+    if not isinstance(capa.get("ativa"), bool):
+        raise TemplateInvalido(
+            f"capa.ativa precisa ser true ou false, veio {capa.get('ativa')!r}")
+    valor = capa.get("tamanho_max")
+    if isinstance(valor, bool) or not isinstance(valor, (int, float)) or valor < 20:
+        raise TemplateInvalido(
+            f"capa.tamanho_max precisa ser número >= 20, veio {valor!r}")
+    valor = capa.get("contorno_espessura")
+    if isinstance(valor, bool) or not isinstance(valor, (int, float)) or valor < 0:
+        raise TemplateInvalido(
+            f"capa.contorno_espessura precisa ser número >= 0, veio {valor!r}")
+    for chave in ("cor", "caixa_cor"):
+        cor_ass(capa[chave])
+    if not isinstance(capa.get("fonte"), str) or not capa["fonte"].strip():
+        raise TemplateInvalido("capa.fonte precisa ser texto")
+    frame = capa.get("frame_inicial")
+    if not isinstance(frame, dict) or not isinstance(frame.get("ativo"), bool):
+        raise TemplateInvalido(
+            "capa.frame_inicial.ativo precisa ser true ou false")
+    dur = frame.get("duracao_s")
+    if isinstance(dur, bool) or not isinstance(dur, (int, float)) \
+            or not 0.0 < dur <= 1.0:
+        raise TemplateInvalido(
+            f"capa.frame_inicial.duracao_s precisa estar em (0, 1], veio {dur!r}")
 
 
 def _validar_sfx(sfx):

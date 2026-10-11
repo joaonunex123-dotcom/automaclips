@@ -698,6 +698,12 @@ YOUTUBE_OAUTH_TOKEN = _caminho(
 # para 'public' quando confiar na fila.
 YOUTUBE_CATEGORIA = _caminho("YOUTUBE_CATEGORIA", "22")
 YOUTUBE_PRIVACIDADE = _caminho("YOUTUBE_PRIVACIDADE", "private")
+# Envia a capa (editing/capa.py) por videos/thumbnails.set depois do upload.
+# DESLIGADO por padrao: custa 50 unidades de quota por clip, exige canal
+# verificado, e em Shorts o YouTube costuma ignorar a capa personalizada na
+# shelf (usa um quadro do video). Ver README, "Capa do clip".
+YOUTUBE_ENVIAR_CAPA = _bool("YOUTUBE_ENVIAR_CAPA", False)
+YOUTUBE_CUSTO_THUMBNAIL = _int("YOUTUBE_CUSTO_THUMBNAIL", 50)
 
 # --- publish: Instagram -------------------------------------------------------
 

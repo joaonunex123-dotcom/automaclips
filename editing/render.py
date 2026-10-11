@@ -208,7 +208,17 @@ def filtergraph(config, ass_nome, duracao_s, sons=None, filler=None,
         entrada = "[vs]"
     acabamento, entrada = efeitos_mod.filtro_acabamento(config, duracao_s, entrada)
     grafo += acabamento
-    grafo += f"{entrada}ass={ass_nome}[vout]"
+    capa_frame = (efeitos or {}).get("capa_frame")
+    if capa_frame:
+        # Por cima da legenda e do hook: nos primeiros instantes o quadro é
+        # um pôster limpo, o que a plataforma tende a usar como capa.
+        indice = 1 + len(sons or []) + (1 if filler else 0)
+        grafo += (
+            f"{entrada}ass={ass_nome}[vass];"
+            f"[vass][{indice}:v]overlay=0:0:eof_action=pass[vout]"
+        )
+    else:
+        grafo += f"{entrada}ass={ass_nome}[vout]"
 
     if efeitos_mod.audio_ativo(config):
         audio = efeitos_mod.cadeia_audio(
@@ -248,6 +258,16 @@ def comando(config, video_path, inicio_s, duracao_s, ass_nome, saida_path,
             "-ss", f"{float(filler.get('inicio_s', 0.0)):.3f}",
             "-t", f"{duracao_s:.3f}",
             "-i", filler["caminho"],
+        ]
+
+    capa_frame = (efeitos or {}).get("capa_frame")
+    if capa_frame:
+        # Imagem parada como fonte de vídeo de duracao_s; depois disso o
+        # overlay (eof_action=pass) devolve o clip sem tocar.
+        argumentos += [
+            "-loop", "1", "-framerate", str(int(saida["fps"])),
+            "-t", f"{float(capa_frame['duracao_s']):.3f}",
+            "-i", capa_frame["caminho"],
         ]
 
     argumentos += [

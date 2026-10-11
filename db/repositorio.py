@@ -77,6 +77,9 @@ COLUNAS_ACRESCENTADAS = (
     # que já existia: antes desta coluna todo clip saía em tela cheia.
     ("renders", "variante", "TEXT NOT NULL DEFAULT 'full'"),
     ("resultados", "variante", "TEXT NOT NULL DEFAULT 'full'"),
+    # Capa gerada por editing/capa.py (vertical; a horizontal fica na mesma
+    # pasta). Vazio para o que foi renderizado antes da coluna existir.
+    ("renders", "capa_path", "TEXT NOT NULL DEFAULT ''"),
 )
 
 
@@ -460,20 +463,23 @@ def custo_acumulado(conn, servico=None):
 # --- renders ------------------------------------------------------------------
 
 def registrar_render(conn, clip_id, caminho, template_versao="", duracao_s=0.0,
-                     variante="full"):
+                     variante="full", capa_path=""):
     """Grava (ou substitui) o artefato renderizado de um clip."""
     with escrita(conn):
         conn.execute(
             "INSERT INTO renders"
-            " (clip_id, caminho, template_versao, duracao_s, variante)"
-            " VALUES (?, ?, ?, ?, ?)"
+            " (clip_id, caminho, template_versao, duracao_s, variante,"
+            "  capa_path)"
+            " VALUES (?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(clip_id) DO UPDATE SET"
             "   caminho = excluded.caminho,"
             "   template_versao = excluded.template_versao,"
             "   duracao_s = excluded.duracao_s,"
             "   variante = excluded.variante,"
+            "   capa_path = excluded.capa_path,"
             "   renderizado_em = datetime('now', 'localtime')",
-            (clip_id, caminho, template_versao, duracao_s, variante or "full"),
+            (clip_id, caminho, template_versao, duracao_s, variante or "full",
+             capa_path or ""),
         )
 
 
@@ -572,6 +578,7 @@ def horarios_agendados(conn, plataforma, desde=None):
 def publicacoes_vencidas(conn, plataforma=None, agora=None, limite=None):
     """Agendamentos cuja hora chegou, do mais antigo para o mais novo."""
     sql = "SELECT p.*, r.caminho AS render_path," \
+          "       r.capa_path AS capa_path," \
           "       r.duracao_s AS render_duracao_s, f.video_id" \
           " FROM publicacoes p" \
           " JOIN clips c ON c.id = p.clip_id" \

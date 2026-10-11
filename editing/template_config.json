@@ -13,7 +13,7 @@
     "numérico do ASS: 1-3 embaixo, 4-6 no meio, 7-9 em cima."
   ],
 
-  "versao": "2",
+  "versao": "3",
 
   "saida": {
     "largura": 1080,
@@ -63,6 +63,23 @@
     ],
     "pesos": {},
     "semente": "ab1"
+  },
+
+  "capa": {
+    "_comentario": [
+      "Capa (thumbnail) do clip: o melhor quadro do trecho (nítido, com rosto,",
+      "sem corte) com o título por cima. Gera <nome>_capa/capa_1080x1920.png e",
+      "capa_1280x720.png ao lado do .mp4. `ativa` só gera os arquivos.",
+      "frame_inicial põe esse mesmo quadro nos primeiros duracao_s do VÍDEO —",
+      "a alternativa para Shorts, onde thumbnails.set costuma ser ignorado."
+    ],
+    "ativa": false,
+    "fonte": "Arial",
+    "tamanho_max": 130,
+    "cor": "#FFFFFF",
+    "caixa_cor": "#000000B0",
+    "contorno_espessura": 8,
+    "frame_inicial": {"ativo": false, "duracao_s": 0.3}
   },
 
   "zoom": {
