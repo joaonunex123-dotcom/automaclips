@@ -34,6 +34,37 @@
     "desfoque_sigma": 30
   },
 
+  "layout": "full",
+
+  "split": {
+    "_comentario": [
+      "Layout A/B. Só vale com layout 'split' ou com uma variante 'split' em",
+      "variantes.pesos. Clip em cima (proporcao_clip da altura), vídeo de",
+      "preenchimento embaixo, sem áudio — o áudio é sempre o do clip.",
+      "Os preenchimentos são arquivos SEUS em <diretorio>/<categoria>/; ver",
+      "assets/filler/README.md. Sem arquivo na categoria, a variante é",
+      "ignorada (e logada), nunca baixada da internet."
+    ],
+    "diretorio": "assets/filler",
+    "_categoria": "categoria usada quando a variante é só 'split' (sem ':categoria')",
+    "categoria": "",
+    "proporcao_clip": 0.6,
+    "_legenda": "no split a legenda tem posição própria; margem_vertical é medida da borda de baixo",
+    "legenda": {"alinhamento": 2, "margem_vertical": 720},
+    "separador": {"ativo": true, "espessura": 6, "cor": "#000000"}
+  },
+
+  "variantes": {
+    "_comentario": [
+      "Teste A/B. pesos: {\"full\": 1, \"split:parkour\": 1}. Cada clip recebe UMA",
+      "variante, sorteada por hash do clip_id (+ semente) e gravada no render:",
+      "o mesmo clip nunca sai em duas variantes. Vazio = todo clip usa `layout`.",
+      "Mudar a semente ou os pesos só afeta clips ainda não renderizados."
+    ],
+    "pesos": {},
+    "semente": "ab1"
+  },
+
   "zoom": {
     "_comentario": [
       "Push-in lento. DESLIGADO por padrão: usa o zoompan do ffmpeg, que é",

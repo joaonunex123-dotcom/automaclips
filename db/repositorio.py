@@ -73,6 +73,10 @@ BUSY_TIMEOUT_MS = 5000
 COLUNAS_ACRESCENTADAS = (
     ("resultados", "compartilhamentos", "INTEGER NOT NULL DEFAULT 0"),
     ("geracoes_llm", "provedor", "TEXT NOT NULL DEFAULT ''"),
+    # Layout A/B ('full' | 'split:<categoria>'). 'full' é verdade para tudo o
+    # que já existia: antes desta coluna todo clip saía em tela cheia.
+    ("renders", "variante", "TEXT NOT NULL DEFAULT 'full'"),
+    ("resultados", "variante", "TEXT NOT NULL DEFAULT 'full'"),
 )
 
 
@@ -455,19 +459,40 @@ def custo_acumulado(conn, servico=None):
 
 # --- renders ------------------------------------------------------------------
 
-def registrar_render(conn, clip_id, caminho, template_versao="", duracao_s=0.0):
+def registrar_render(conn, clip_id, caminho, template_versao="", duracao_s=0.0,
+                     variante="full"):
     """Grava (ou substitui) o artefato renderizado de um clip."""
     with escrita(conn):
         conn.execute(
-            "INSERT INTO renders (clip_id, caminho, template_versao, duracao_s)"
-            " VALUES (?, ?, ?, ?)"
+            "INSERT INTO renders"
+            " (clip_id, caminho, template_versao, duracao_s, variante)"
+            " VALUES (?, ?, ?, ?, ?)"
             " ON CONFLICT(clip_id) DO UPDATE SET"
             "   caminho = excluded.caminho,"
             "   template_versao = excluded.template_versao,"
             "   duracao_s = excluded.duracao_s,"
+            "   variante = excluded.variante,"
             "   renderizado_em = datetime('now', 'localtime')",
-            (clip_id, caminho, template_versao, duracao_s),
+            (clip_id, caminho, template_versao, duracao_s, variante or "full"),
         )
+
+
+def variante_gravada(conn, clip_id):
+    """A variante que este clip JÁ teve (render ou medição), ou None.
+
+    É o que impede o mesmo clip de mudar de layout depois de renderizado ou
+    publicado, mesmo que pesos e semente do template mudem.
+    """
+    linha = conn.execute(
+        "SELECT variante FROM renders WHERE clip_id = ?", (clip_id,)
+    ).fetchone()
+    if linha and linha["variante"]:
+        return linha["variante"]
+    linha = conn.execute(
+        "SELECT variante FROM resultados WHERE clip_id = ?"
+        " ORDER BY id DESC LIMIT 1", (clip_id,)
+    ).fetchone()
+    return linha["variante"] if linha and linha["variante"] else None
 
 
 def render(conn, clip_id):
@@ -701,10 +726,12 @@ def publicacoes_para_medir(conn, idade_minima_h=0.0, agora=None, limite=None):
     sql = (
         "SELECT p.*, c.inicio_s, c.fim_s, c.score_final, c.hook_text, c.motivo,"
         "       f.canal_id AS canal_id_fonte, f.canal_nome AS canal_fonte,"
+        "       COALESCE(rd.variante, 'full') AS variante,"
         f"       ({instante} - julianday(p.publicado_em)) * 24.0 AS horas_publicado"
         " FROM publicacoes p"
         " JOIN clips c ON c.id = p.clip_id"
         " JOIN fila_clips f ON f.id = c.fila_clip_id"
+        " LEFT JOIN renders rd ON rd.clip_id = p.clip_id"
         " WHERE p.status = ? AND p.publicado_em IS NOT NULL"
         "   AND p.id_externo <> ''"
         f"   AND ({instante} - julianday(p.publicado_em)) * 24.0 >= ?"
@@ -717,6 +744,13 @@ def publicacoes_para_medir(conn, idade_minima_h=0.0, agora=None, limite=None):
     return conn.execute(sql, parametros).fetchall()
 
 
+def _variante_da_publicacao(publicacao):
+    try:
+        return publicacao["variante"] or "full"
+    except (KeyError, IndexError):
+        return "full"
+
+
 def registrar_resultado(conn, publicacao, metricas, horas_publicado=0.0):
     """Anexa uma medicao. `publicacao` e a linha de publicacoes_para_medir."""
     with escrita(conn):
@@ -725,8 +759,8 @@ def registrar_resultado(conn, publicacao, metricas, horas_publicado=0.0):
             " (publicacao_id, clip_id, plataforma, canal_id_fonte, canal_fonte,"
             "  trecho_inicio_s, trecho_duracao_s, score_previsto,"
             "  views, likes, comentarios, compartilhamentos, retencao,"
-            "  horas_publicado)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "  horas_publicado, variante)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 publicacao["id"], publicacao["clip_id"], publicacao["plataforma"],
                 publicacao["canal_id_fonte"] or "", publicacao["canal_fonte"] or "",
@@ -741,6 +775,7 @@ def registrar_resultado(conn, publicacao, metricas, horas_publicado=0.0):
                 int(metricas.get("compartilhamentos") or 0),
                 metricas.get("retencao"),
                 float(horas_publicado or 0),
+                _variante_da_publicacao(publicacao),
             ),
         )
 

@@ -19,6 +19,7 @@ import sys
 import settings
 from analytics import coletar as coletar_mod
 from analytics import recalibrate
+from analytics import variantes as variantes_mod
 from db import repositorio
 
 log = logging.getLogger(__name__)
@@ -71,6 +72,8 @@ def _resumo(conn, medidos, resultado):
     if resultado["licoes"]:
         linhas += ["", "--- o que separou os clips que renderam ---",
                    f"  {resultado['licoes']}"]
+
+    linhas += ["", *variantes_mod.formatar(variantes_mod.comparar(conn))]
 
     calibrado = repositorio.toda_calibracao(conn)
     if calibrado:

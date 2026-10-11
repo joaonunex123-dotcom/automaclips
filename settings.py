@@ -266,6 +266,11 @@ ANALYTICS_HORAS_MINIMAS = _float("ANALYTICS_HORAS_MINIMAS", 6.0)
 # views/hora por faixa, que e pior mas nao e chute.
 ANALYTICS_RETENCAO = _bool("ANALYTICS_RETENCAO", False)
 
+# Posts medidos por variante de layout (A/B) abaixo dos quais o analytics diz
+# "dado insuficiente" em vez de comparar. Com n pequeno, a diferença entre
+# duas variantes é ruído de distribuição de views, que tem cauda longa.
+ANALYTICS_MIN_POR_VARIANTE = _int("ANALYTICS_MIN_POR_VARIANTE", 15)
+
 # --- recalibracao: quanto dado e "dado suficiente" ----------------------------
 #
 # Todos os minimos abaixo existem pelo mesmo motivo: recalibrar com tres clips

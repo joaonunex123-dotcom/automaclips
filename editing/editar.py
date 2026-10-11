@@ -22,6 +22,7 @@ import sys
 
 import settings
 from db import repositorio
+from editing import layout as layout_mod
 from editing import legendas as legendas_mod
 from editing import render as render_mod
 from editing import sfx as sfx_mod
@@ -55,7 +56,7 @@ def _carregar_fontes(linha, carregar_transcricao):
 
 
 def renderizar_clip(conn, linha, config, biblioteca=None, carregar_transcricao=None,
-                    renderizar=None, destino_dir=None):
+                    renderizar=None, destino_dir=None, planejar_filler=None):
     """Produz o arquivo de um clip e registra o artefato. Devolve o caminho."""
     carregar_transcricao = carregar_transcricao or transcribe_mod.carregar
     renderizar = renderizar or render_mod.renderizar
@@ -68,8 +69,13 @@ def renderizar_clip(conn, linha, config, biblioteca=None, carregar_transcricao=N
     # word-by-word e a detecção de palavra-chave do SFX. Recalcular para o
     # segundo uso convidaria os dois a divergirem.
     palavras = legendas_mod.palavras_do_trecho(transcricao, inicio, fim)
+    # Layout A/B. A variante é decidida (ou recuperada, se o clip já teve uma)
+    # ANTES do .ass porque a posição da legenda muda no split.
+    variante = layout_mod.variante_do_clip(conn, linha["id"], config)
+    config_layout = layout_mod.config_do_layout(config, variante)
     ass_texto = legendas_mod.gerar_ass(
-        config, palavras, hook_text=linha["hook_text"] or "", duracao_s=duracao
+        config_layout, palavras, hook_text=linha["hook_text"] or "",
+        duracao_s=duracao,
     )
 
     sons = sfx_mod.planejar(
@@ -80,14 +86,25 @@ def renderizar_clip(conn, linha, config, biblioteca=None, carregar_transcricao=N
     )
     nome = render_mod.nome_base(linha["video_id"], linha["id"])
 
+    # `filler` só vai para o render quando o layout é split: o caminho "full"
+    # chama o renderizador exatamente como antes do A/B existir.
+    extras = {}
+    plano = layout_mod.filler_do_layout(
+        config, variante, duracao, clip_id=linha["id"],
+        planejar=planejar_filler,
+    )
+    if plano:
+        extras["filler"] = plano
+
     caminho = renderizar(
-        config, video_path, inicio, fim, ass_texto, nome,
-        destino_dir=destino_dir, sons=sons,
+        config_layout, video_path, inicio, fim, ass_texto, nome,
+        destino_dir=destino_dir, sons=sons, **extras,
     )
     repositorio.registrar_render(
         conn, linha["id"], caminho,
         template_versao=str(config.get("versao", "")),
         duracao_s=duracao,
+        variante=variante,
     )
     return caminho
 
@@ -133,6 +150,7 @@ def _resumo(conn, contagem, config):
         f"  (template versão {config.get('versao')}, "
         f"{config['saida']['largura']}x{config['saida']['altura']}, "
         f"reframe {config['reframe']['modo']}, "
+        f"layout {', '.join(sorted(layout_mod.variantes_disponiveis(config)))}, "
         f"sfx {'ligado' if config['sfx'].get('ativo') else 'desligado'})",
     ]
 

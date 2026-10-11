@@ -277,7 +277,10 @@ CREATE TABLE IF NOT EXISTS renders (
     -- inteira sem deixar rastro.
     template_versao TEXT NOT NULL DEFAULT '',
     duracao_s       REAL NOT NULL DEFAULT 0,
-    renderizado_em  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+    renderizado_em  TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    -- Layout A/B: 'full' ou 'split:<categoria>' (editing/layout.py). Um clip
+    -- tem uma variante só; é a que a etapa 7 compara.
+    variante        TEXT NOT NULL DEFAULT 'full'
 );
 
 -- ============================================================================
@@ -438,7 +441,11 @@ CREATE TABLE IF NOT EXISTS resultados (
     -- ranquear por views cruas premiaria post antigo, o mesmo erro que o score
     -- de sourcing existe para evitar.
     horas_publicado REAL NOT NULL DEFAULT 0,
-    coletado_em    TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+    coletado_em    TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+
+    -- Layout do render, congelado como o resto: o A/B compara views/hora por
+    -- variante (analytics/variantes.py).
+    variante       TEXT NOT NULL DEFAULT 'full'
 );
 CREATE INDEX IF NOT EXISTS ix_resultados_publicacao
     ON resultados (publicacao_id, id DESC);

@@ -315,6 +315,30 @@ a diferença de performance entre dois clips veio do trecho ou do visual —
 **mude a versão sempre que mexer no template**, senão a série histórica mistura
 dois visuais sem deixar rastro.
 
+## Layouts A/B (full x split)
+
+O clip sai em tela cheia (`"layout": "full"`, o padrão) ou em **split**: clip em
+cima (~60%) e um vídeo de preenchimento embaixo (~40%), sem áudio — o som é
+sempre o do clip. Tudo em `editing/template_config.json`: `split.proporcao_clip`,
+`split.categoria`, `split.legenda` (posição da legenda no split) e
+`split.separador`.
+
+Para testar, dê pesos às variantes:
+
+```json
+"variantes": { "pesos": { "full": 1, "split:parkour": 1 }, "semente": "ab1" }
+```
+
+Cada clip recebe **uma** variante, por hash do `clip_id`, gravada em `renders` e
+em `resultados` (coluna `variante`); o mesmo clip nunca sai em dois layouts.
+`python -m analytics.analisar` compara views/hora (relativo à plataforma) por
+variante, mostra o n de cada uma e diz "dado insuficiente" com n < 15
+(`ANALYTICS_MIN_POR_VARIANTE`).
+
+Os preenchimentos são arquivos seus em `assets/filler/<categoria>/` — o sistema
+não baixa nada, e categoria vazia só desativa a variante (com log). Formato e
+aviso de licença: [assets/filler/README.md](assets/filler/README.md).
+
 ## Efeitos sonoros
 
 Desligados por padrão: dependem de arquivos de áudio que não vêm no
@@ -659,6 +683,7 @@ analytics/recalibrate.py     as quatro recalibrações
 analytics/analisar.py        mede e recalibra
 
 assets/sfx/                  os arquivos de efeito (fora do git)
+assets/filler/               vídeos de preenchimento do layout split (fora do git)
 ```
 
 `fila_clips` guarda o vídeo-FONTE; `midia` os artefatos baixados; `clips` os

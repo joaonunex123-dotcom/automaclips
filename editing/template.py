@@ -52,6 +52,17 @@ PADRAO = {
         "contorno_espessura": 2, "sombra": 0, "margem_vertical": 60,
         "alinhamento": 8,
     },
+    # Layout A/B. "full" é o clip tela cheia de sempre; "split" põe o clip em
+    # cima e um vídeo de preenchimento embaixo (ver editing/layout.py).
+    "layout": "full",
+    "split": {
+        "diretorio": "assets/filler", "categoria": "", "proporcao_clip": 0.6,
+        "legenda": {"alinhamento": 2, "margem_vertical": 720},
+        "separador": {"ativo": True, "espessura": 6, "cor": "#000000"},
+    },
+    # {"full": 1, "split:parkour": 1}: sorteio ponderado e estável por clip.
+    # Vazio = todo clip usa `layout`.
+    "variantes": {"pesos": {}, "semente": "ab1"},
     "sfx": {
         "ativo": False, "diretorio": "assets/sfx", "volume": 0.6,
         "espacamento_minimo_s": 1.5, "maximo_por_clip": 8,
@@ -62,6 +73,7 @@ PADRAO = {
 }
 
 MODOS_REFRAME = ("corte", "desfoque")
+LAYOUTS = ("full", "split")
 
 # Gatilhos que editing/sfx.py sabe posicionar. Um som com gatilho fora desta
 # lista é erro de configuração, não um som que simplesmente nunca toca: o
@@ -130,8 +142,59 @@ def validar(config):
     if config["watermark"]["ativo"] and not str(config["watermark"]["texto"]).strip():
         raise TemplateInvalido("watermark.ativo mas watermark.texto está vazio")
 
+    _validar_layout(config)
     _validar_sfx(config["sfx"])
     return config
+
+
+def _validar_layout(config):
+    layout = config["layout"]
+    if layout not in LAYOUTS:
+        raise TemplateInvalido(f"layout precisa ser um de {LAYOUTS}, veio {layout!r}")
+
+    split = config["split"]
+    _exigir_numero(config, "split", "proporcao_clip", minimo=0.2, maximo=0.8)
+    for chave in ("diretorio", "categoria"):
+        if not isinstance(split.get(chave), str):
+            raise TemplateInvalido(f"split.{chave} precisa ser texto")
+    leg = split["legenda"]
+    for chave, minimo, maximo in (("alinhamento", 1, 9), ("margem_vertical", 0, None)):
+        valor = leg.get(chave)
+        if isinstance(valor, bool) or not isinstance(valor, (int, float)):
+            raise TemplateInvalido(f"split.legenda.{chave} precisa ser número, veio {valor!r}")
+        if valor < minimo or (maximo is not None and valor > maximo):
+            raise TemplateInvalido(f"split.legenda.{chave} fora da faixa, veio {valor}")
+    sep = split["separador"]
+    valor = sep.get("espessura")
+    if isinstance(valor, bool) or not isinstance(valor, (int, float)) or valor < 0:
+        raise TemplateInvalido(f"split.separador.espessura precisa ser número >= 0, veio {valor!r}")
+    cor_ass(sep["cor"])
+
+    variantes = config["variantes"]
+    pesos = variantes.get("pesos")
+    if not isinstance(pesos, dict):
+        raise TemplateInvalido("variantes.pesos precisa ser um objeto")
+    for nome, peso in pesos.items():
+        layout_v, _, categoria = str(nome).partition(":")
+        if layout_v not in LAYOUTS:
+            raise TemplateInvalido(
+                f"variantes.pesos[{nome!r}]: layout precisa ser um de {LAYOUTS}"
+            )
+        if layout_v == "full" and categoria:
+            raise TemplateInvalido(f"variantes.pesos[{nome!r}]: 'full' não tem categoria")
+        if layout_v == "split" and not (categoria or split["categoria"]):
+            raise TemplateInvalido(
+                f"variantes.pesos[{nome!r}]: sem categoria (use 'split:<categoria>' "
+                "ou defina split.categoria)"
+            )
+        if isinstance(peso, bool) or not isinstance(peso, (int, float)) or peso < 0:
+            raise TemplateInvalido(
+                f"variantes.pesos[{nome!r}] precisa ser número >= 0, veio {peso!r}"
+            )
+    if pesos and not any(p > 0 for p in pesos.values()):
+        raise TemplateInvalido("variantes.pesos: todos os pesos são zero")
+    if layout == "split" and not pesos and not split["categoria"]:
+        raise TemplateInvalido("layout 'split' exige split.categoria")
 
 
 def _validar_sfx(sfx):

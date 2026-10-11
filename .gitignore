@@ -45,6 +45,10 @@ clips/
 assets/sfx/*
 !assets/sfx/README.md
 
+# Vídeos de preenchimento do layout split: seus, licenciados individualmente.
+assets/filler/*
+!assets/filler/README.md
+
 # Bancada de teste local: video sintetico, transcricao e render de
 # validacao. Reproduzivel por teste_local/primeiro_clip.py.
 teste_local/
