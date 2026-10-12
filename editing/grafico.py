@@ -297,7 +297,10 @@ def filtro_segmento(config, indice, seg, altura_alvo=None, duracao_s=None):
     fade = (f"format=yuva420p,fade=t=in:st={a:.3f}:d={d:.3f}:alpha=1,"
             f"fade=t=out:st={b - d:.3f}:d={d:.3f}:alpha=1")
 
-    if cfg["fundo"] == "solido":
+    # O segmento do modo multi carrega o próprio fundo (multi.fundo); sem
+    # chave, vale o de grafico.fundo.
+    fundo = seg.get("fundo") or cfg["fundo"]
+    if fundo == "solido":
         cor = _cor_ffmpeg(cfg["cor_solida"])
         return (f"{entrada}{fit},"
                 f"pad={largura}:{altura}:(ow-iw)/2:(oh-ih)/2:color={cor},"

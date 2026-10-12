@@ -89,6 +89,15 @@ PADRAO = {
         "desfoque_sigma": 30, "transicao_s": 0.25, "min_duracao_s": 1.5,
         "maximo_por_clip": 3, "amostras_por_s": 2.0, "largura_minima": 0.70,
     },
+    # Modo multi (editing/rosto.py): 2+ pessoas que não cabem juntas no crop
+    # 9:16 aparecem com o quadro INTEIRO, igual ao modo gráfico. Equivale a
+    # "layout.multi" do pedido: `layout` já é o texto full/split, então a
+    # seção mora ao lado de `grafico`.
+    "multi": {
+        "ativo": False, "fundo": "desfoque", "min_rosto": 0.06,
+        "histerese_entrada": 3, "histerese_saida": 4,
+        "amostras_por_s": 2.0, "maximo_por_clip": 6,
+    },
     # Efeitos de edição (ver editing/efeitos.py). Tudo desligado: com as flags
     # em false o filtergraph é o mesmo de antes de a seção existir.
     "efeitos": {
@@ -210,6 +219,7 @@ def validar(config):
     _validar_layout(config)
     _validar_capa(config["capa"])
     _validar_grafico(config["grafico"])
+    _validar_multi(config["multi"])
     _validar_sfx(config["sfx"])
     _validar_efeitos(config["efeitos"])
     return config
@@ -312,6 +322,31 @@ def _validar_grafico(g):
         if valor < minimo or valor > maximo:
             raise TemplateInvalido(
                 f"grafico.{chave} precisa estar em [{minimo}, {maximo}], "
+                f"veio {valor}")
+
+
+def _validar_multi(m):
+    if not isinstance(m.get("ativo"), bool):
+        raise TemplateInvalido(
+            f"multi.ativo precisa ser true ou false, veio {m.get('ativo')!r}")
+    if m.get("fundo") not in ("desfoque", "solido"):
+        raise TemplateInvalido(
+            f"multi.fundo precisa ser 'desfoque' ou 'solido', "
+            f"veio {m.get('fundo')!r}")
+    for chave, minimo, maximo, inteiro in (
+            ("min_rosto", 0.01, 0.5, False), ("histerese_entrada", 1, 30, True),
+            ("histerese_saida", 1, 30, True), ("amostras_por_s", 0.5, 8.0, False),
+            ("maximo_por_clip", 1, 10, True)):
+        valor = m.get(chave)
+        if isinstance(valor, bool) or not isinstance(valor, (int, float)):
+            raise TemplateInvalido(
+                f"multi.{chave} precisa ser número, veio {valor!r}")
+        if inteiro and int(valor) != valor:
+            raise TemplateInvalido(
+                f"multi.{chave} precisa ser inteiro, veio {valor!r}")
+        if valor < minimo or valor > maximo:
+            raise TemplateInvalido(
+                f"multi.{chave} precisa estar em [{minimo}, {maximo}], "
                 f"veio {valor}")
 
 

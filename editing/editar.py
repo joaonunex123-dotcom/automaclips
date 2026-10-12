@@ -16,6 +16,8 @@ estados.
 Falha em um clip não derruba os outros — a mesma política do pipeline.
 """
 import argparse
+import copy
+import json
 import logging
 import os
 import sys
@@ -61,7 +63,8 @@ def _carregar_fontes(linha, carregar_transcricao):
 
 def renderizar_clip(conn, linha, config, biblioteca=None, carregar_transcricao=None,
                     renderizar=None, destino_dir=None, planejar_filler=None,
-                    gerar_capa=None, detectar_grafico=None, amostrar_rosto=None):
+                    gerar_capa=None, detectar_grafico=None, amostrar_rosto=None,
+                    detectar_multi=None):
     """Produz o arquivo de um clip e registra o artefato. Devolve o caminho."""
     carregar_transcricao = carregar_transcricao or transcribe_mod.carregar
     renderizar = renderizar or render_mod.renderizar
@@ -78,6 +81,32 @@ def renderizar_clip(conn, linha, config, biblioteca=None, carregar_transcricao=N
     # ANTES do .ass porque a posição da legenda muda no split.
     variante = layout_mod.variante_do_clip(conn, linha["id"], config)
     config_layout = layout_mod.config_do_layout(config, variante)
+    # `filler` só vai para o render quando o layout é split: o caminho "full"
+    # chama o renderizador exatamente como antes do A/B existir.
+    extras = {}
+    plano = layout_mod.filler_do_layout(
+        config, variante, duracao, clip_id=linha["id"],
+        planejar=planejar_filler,
+    )
+    if plano:
+        extras["filler"] = plano
+    nome = render_mod.nome_base(linha["video_id"], linha["id"])
+
+    # Quadro inteiro: gráfico (prioridade) e multi. Vem ANTES da legenda
+    # porque ela sai da frente dos rostos quando o quadro fica alto.
+    segmentos = _segmentos_grafico(config, config_layout, plano, video_path,
+                                   inicio, fim, detectar_grafico)
+    segmentos_multi, trilha_multi = _segmentos_multi(
+        config, config_layout, plano, video_path, inicio, fim, segmentos,
+        detectar_multi, nome, destino_dir)
+    segmentos = sorted(segmentos + segmentos_multi,
+                       key=lambda s: s["inicio_s"])
+    if trilha_multi:
+        config_layout = copy.deepcopy(config_layout)
+        config_layout["reframe"]["trilha"] = trilha_multi
+    if segmentos_multi:
+        config_layout = _legenda_fora_dos_rostos(
+            config_layout, segmentos_multi, plano)
     ass_texto = legendas_mod.gerar_ass(
         config_layout, palavras, hook_text=linha["hook_text"] or "",
         duracao_s=duracao,
@@ -90,17 +119,7 @@ def renderizar_clip(conn, linha, config, biblioteca=None, carregar_transcricao=N
         palavras=palavras,
         biblioteca=biblioteca if biblioteca is not None else {},
     )
-    nome = render_mod.nome_base(linha["video_id"], linha["id"])
 
-    # `filler` só vai para o render quando o layout é split: o caminho "full"
-    # chama o renderizador exatamente como antes do A/B existir.
-    extras = {}
-    plano = layout_mod.filler_do_layout(
-        config, variante, duracao, clip_id=linha["id"],
-        planejar=planejar_filler,
-    )
-    if plano:
-        extras["filler"] = plano
     # Efeitos de edição: só entram na chamada quando alguma flag está ligada,
     # então com a seção desligada o renderizador é chamado como antes.
     extras_efeitos = {}
@@ -119,8 +138,6 @@ def renderizar_clip(conn, linha, config, biblioteca=None, carregar_transcricao=N
             "caminho": capa_info["vertical"],
             "duracao_s": float(frame["duracao_s"]),
         }
-    segmentos = _segmentos_grafico(config, config_layout, plano, video_path,
-                                   inicio, fim, detectar_grafico)
     if segmentos:
         extras_efeitos["grafico"] = segmentos
     if efeitos_mod.cadencia_governa(config):
@@ -134,7 +151,8 @@ def renderizar_clip(conn, linha, config, biblioteca=None, carregar_transcricao=N
         extras["efeitos"] = extras_efeitos
 
     # Reframe que segue o rosto: no-op com reframe.rosto.ativo == false.
-    config_render = rosto_mod.aplicar(
+    # Com o modo multi ligado a trilha já veio da mesma análise.
+    config_render = config_layout if trilha_multi else rosto_mod.aplicar(
         config_layout, video_path, inicio, fim, amostrar_fn=amostrar_rosto)
 
     caminho = renderizar(
@@ -164,6 +182,113 @@ def _segmentos_grafico(config, config_layout, filler, video_path, inicio, fim,
     except Exception as e:
         log.warning("Modo gráfico indisponível (%s); clip sai como antes.", e)
         return []
+
+
+def _recortar_intervalos(seg, ocupados, minimo_s=0.5):
+    """Partes de `seg` fora dos intervalos `ocupados` (gráfico vence multi)."""
+    pedacos = [(float(seg["inicio_s"]), float(seg["fim_s"]))]
+    for oi, of in sorted((float(o["inicio_s"]), float(o["fim_s"]))
+                         for o in ocupados):
+        novos = []
+        for a, b in pedacos:
+            if of <= a or oi >= b:
+                novos.append((a, b))
+                continue
+            if oi - a > 0:
+                novos.append((a, oi))
+            if b - of > 0:
+                novos.append((of, b))
+        pedacos = novos
+    return [{**seg, "inicio_s": round(a, 3), "fim_s": round(b, 3)}
+            for a, b in pedacos if b - a >= minimo_s]
+
+
+def _segmentos_multi(config, config_layout, filler, video_path, inicio, fim,
+                     segmentos_grafico, detectar_multi, nome, destino_dir):
+    """([segmentos "multi" com geometria], trilha_do_crop | None).
+
+    Nunca levanta: sem OpenCV, sem rosto confiável ou com a flag desligada,
+    ([], None) e o clip sai como antes. A prioridade é gráfico > multi >
+    single: o multi só ocupa o que o gráfico deixou livre.
+    """
+    cfg = config.get("multi") or {}
+    if not cfg.get("ativo"):
+        return [], None
+    detectar_multi = detectar_multi or rosto_mod.detectar_multi
+    altura = layout_mod.alturas(config)[0] if filler else None
+    try:
+        analise = detectar_multi(video_path, inicio, fim, config)
+        if not analise:
+            return [], None
+        brutos = []
+        for s in analise["segmentos"]:
+            if s["modo"] != "multi":
+                continue
+            x0, y0, x1, y1 = s["caixa"] or (0.0, 0.0, 1.0, 1.0)
+            # Rosto + ombros/corpo: o recorte de ampliação não pode cortar
+            # ninguém do peito para cima.
+            y1 = min(1.0, y1 + 2.0 * (y1 - y0))
+            brutos.append({"inicio_s": s["inicio_s"], "fim_s": s["fim_s"],
+                           "caixa": (x0, y0, x1, y1), "fundo": cfg["fundo"],
+                           "origem": "multi", "n_rostos": s["n_rostos"]})
+        livres = []
+        for s in brutos:
+            livres += _recortar_intervalos(s, segmentos_grafico)
+        livres = livres[: int(cfg["maximo_por_clip"])]
+        planejados = grafico_mod.planejar(video_path, livres, config, altura)
+        _gravar_depuracao_multi(analise, planejados, nome, destino_dir)
+        return planejados, analise.get("trilha")
+    except Exception as e:
+        log.warning("Modo multi indisponível (%s); clip sai como antes.", e)
+        return [], None
+
+
+def _gravar_depuracao_multi(analise, usados, nome, destino_dir):
+    """<nome>_multi.json ao lado do .mp4: o que foi detectado e o que foi usado."""
+    try:
+        destino = destino_dir or settings.RENDER_DIR
+        os.makedirs(destino, exist_ok=True)
+        dados = {
+            "dimensoes_fonte": analise.get("dimensoes"),
+            "segmentos": analise["segmentos"],
+            "trocas_de_modo": rosto_mod.trocas_de_modo(analise["segmentos"]),
+            "trilha_single": analise.get("trilha"),
+            "segmentos_usados": usados,
+            "amostras": analise.get("amostras"),
+        }
+        with open(os.path.join(destino, f"{nome}_multi.json"), "w",
+                  encoding="utf-8") as f:
+            json.dump(dados, f, ensure_ascii=False, indent=1)
+    except Exception as e:
+        log.warning("Não gravei a depuração do modo multi (%s).", e)
+
+
+def _legenda_fora_dos_rostos(config_layout, segmentos_multi, filler):
+    """Config com a legenda abaixo do quadro inteiro, se ele a alcançasse.
+
+    O quadro contido fica centrado na área do clip; a legenda é medida da
+    borda de baixo. Só desce quando o quadro invade a faixa dela — o resto do
+    tempo ela já fica na região desfocada, abaixo.
+    """
+    saida = config_layout["saida"]
+    altura_total = int(saida["altura"])
+    area = layout_mod.alturas(config_layout)[0] if filler else altura_total
+    base_quadro = max((area + int(s["altura_final"])) / 2.0
+                      for s in segmentos_multi)
+    leg = config_layout["legenda"]
+    margem = int(leg["margem_vertical"])
+    altura_texto = int(leg["tamanho"] * 1.3)
+    topo_legenda = altura_total - margem - altura_texto
+    folga = 24
+    if base_quadro + folga <= topo_legenda:
+        return config_layout
+    nova = int(altura_total - base_quadro - folga - altura_texto)
+    if nova < 30:
+        log.info("Legenda não tem como sair de baixo do quadro inteiro.")
+        return config_layout
+    efetivo = copy.deepcopy(config_layout)
+    efetivo["legenda"]["margem_vertical"] = nova
+    return efetivo
 
 
 def _gerar_capa(config, linha, video_path, inicio, fim, nome, destino_dir,
