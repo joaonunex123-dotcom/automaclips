@@ -388,6 +388,11 @@ YTDLP_FORMATO = _caminho(
 # Servidor de PO token (bgutil), necessário para o 1080p. Sem ele o download
 # cai para 360p (pipeline/download.py). Subir/parar: ops/pot_provider.sh.
 POT_URL = _caminho("POT_PROVIDER_URL", "http://127.0.0.1:4416")
+# Vídeos de preenchimento (assets/filler/MANIFESTO.json): aceita os de licença
+# "padrao" (direitos reservados, baixados para teste interno)? Padrão true
+# durante o teste do layout split; desligue para usar só CC ou gravação própria.
+FILLER_PERMITIR_LICENCA_PADRAO = _bool("FILLER_PERMITIR_LICENCA_PADRAO", True)
+
 # Caminho do node para o yt-dlp resolver o desafio JS do YouTube. Vazio = o
 # que estiver no PATH.
 YTDLP_JS_RUNTIME = _caminho("YTDLP_JS_RUNTIME", "")

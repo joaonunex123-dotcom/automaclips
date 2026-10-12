@@ -48,6 +48,8 @@ assets/sfx/*
 # Vídeos de preenchimento do layout split: seus, licenciados individualmente.
 assets/filler/*
 !assets/filler/README.md
+# O manifesto (origem/licença de cada arquivo) é versionado; os vídeos não.
+!assets/filler/MANIFESTO.json
 
 # Bancada de teste local: video sintetico, transcricao e render de
 # validacao. Reproduzivel por teste_local/primeiro_clip.py.
