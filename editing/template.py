@@ -58,6 +58,17 @@ PADRAO = {
         "contorno_espessura": 2, "sombra": 0, "margem_vertical": 60,
         "alinhamento": 8,
     },
+    # Layout A/B. "full" é o clip tela cheia de sempre; "split" põe o clip em
+    # cima e um vídeo de preenchimento embaixo (ver editing/layout.py).
+    "layout": "full",
+    "split": {
+        "diretorio": "assets/filler", "categoria": "", "proporcao_clip": 0.6,
+        "legenda": {"alinhamento": 2, "margem_vertical": 720},
+        "separador": {"ativo": True, "espessura": 6, "cor": "#000000"},
+    },
+    # {"full": 1, "split:parkour": 1}: sorteio ponderado e estável por clip.
+    # Vazio = todo clip usa `layout`.
+    "variantes": {"pesos": {}, "semente": "ab1"},
     "sfx": {
         "ativo": False, "diretorio": "assets/sfx", "volume": 0.6,
         "espacamento_minimo_s": 1.5, "maximo_por_clip": 8,
@@ -65,9 +76,72 @@ PADRAO = {
         "na_abertura": True, "no_fim_do_hook": True,
         "exclamacao_conta": True, "palavras_chave": [],
     },
+    # Capa (thumbnail) do clip e quadro de título nos primeiros instantes.
+    "capa": {
+        "ativa": False, "fonte": "Arial", "tamanho_max": 130, "cor": "#FFFFFF",
+        "caixa_cor": "#000000B0", "contorno_espessura": 8,
+        "frame_inicial": {"ativo": False, "duracao_s": 0.3},
+    },
+    # Modo gráfico (ver editing/grafico.py): slide/gráfico/tabela da fonte
+    # aparece inteiro, sobre fundo preenchido, em vez do crop 9:16 central.
+    "grafico": {
+        "ativo": False, "fundo": "desfoque", "cor_solida": "#101418",
+        "desfoque_sigma": 30, "transicao_s": 0.25, "min_duracao_s": 1.5,
+        "maximo_por_clip": 3, "amostras_por_s": 2.0, "largura_minima": 0.70,
+    },
+    # Modo multi (editing/rosto.py): 2+ pessoas que não cabem juntas no crop
+    # 9:16 aparecem com o quadro INTEIRO, igual ao modo gráfico. Equivale a
+    # "layout.multi" do pedido: `layout` já é o texto full/split, então a
+    # seção mora ao lado de `grafico`.
+    "multi": {
+        "ativo": False, "fundo": "desfoque", "min_rosto": 0.06,
+        "histerese_entrada": 3, "histerese_saida": 4,
+        "amostras_por_s": 2.0, "maximo_por_clip": 6,
+    },
+    # Efeitos de edição (ver editing/efeitos.py). Tudo desligado: com as flags
+    # em false o filtergraph é o mesmo de antes de a seção existir.
+    "efeitos": {
+        "zoom": {
+            "ativo": False, "modo": "picos", "fator": 1.08, "duracao_s": 0.6,
+            "intervalo_s": 4.0, "espacamento_minimo_s": 2.0,
+            "maximo_por_clip": 8,
+        },
+        "flash": {
+            "ativo": False, "intensidade": 0.35, "duracao_s": 0.18,
+            "na_abertura": True, "no_fim_do_hook": True,
+        },
+        "vinheta": {"ativo": False, "angulo": 0.6},
+        "barra": {"ativo": False, "altura": 8, "cor": "#FFD400",
+                  "posicao": "base"},
+        # Transições novas (planejadas por efeitos.planejar_transicoes).
+        "shutter": {"ativo": False, "intensidade": 0.85, "duracao_s": 0.30},
+        "iris": {"ativo": False, "intensidade": 0.80, "duracao_s": 0.40},
+        "whip_pan": {"ativo": False, "intensidade": 0.60, "duracao_s": 0.30},
+        "glitch": {"ativo": False, "intensidade": 0.50, "duracao_s": 0.20},
+        "cadencia": {"ativo": False, "espacamento_minimo_s": 4.0,
+                     "maximo_por_clip": 6},
+        "voz": {"ativo": False, "lufs": -16.0},
+        "ducking": {"ativo": False, "limiar": 0.03, "razao": 8.0,
+                    "ataque_ms": 5.0, "liberacao_ms": 250.0},
+        "pad": {"ativo": False, "arquivo": "pad_{categoria}.wav",
+                "volume": 1.0},
+        "teto_sfx_abaixo_da_voz_db": 8.0,
+        # Master: limiter depois da mixagem (teto em dBFS).
+        "limiter": {"ativo": False, "teto_db": -1.5},
+        # SFX sintetizados que acompanham os efeitos visuais, no mesmo quadro.
+        "sfx_visuais": {
+            "ativo": False, "volume": 0.8,
+            "categorias": {"whoosh": True, "shutter": True, "pop": True,
+                           "impacto": True, "riser": True},
+            "mapa": {"shutter": "shutter", "iris": "riser",
+                     "whip_pan": "whoosh", "glitch": "pop",
+                     "flash": "impacto", "zoom": "impacto"},
+        },
+    },
 }
 
 MODOS_REFRAME = ("corte", "desfoque")
+LAYOUTS = ("full", "split")
 
 # Gatilhos que editing/sfx.py sabe posicionar. Um som com gatilho fora desta
 # lista é erro de configuração, não um som que simplesmente nunca toca: o
@@ -142,8 +216,138 @@ def validar(config):
     if config["watermark"]["ativo"] and not str(config["watermark"]["texto"]).strip():
         raise TemplateInvalido("watermark.ativo mas watermark.texto está vazio")
 
+    _validar_layout(config)
+    _validar_capa(config["capa"])
+    _validar_grafico(config["grafico"])
+    _validar_multi(config["multi"])
     _validar_sfx(config["sfx"])
+    _validar_efeitos(config["efeitos"])
     return config
+
+
+def _validar_layout(config):
+    layout = config["layout"]
+    if layout not in LAYOUTS:
+        raise TemplateInvalido(f"layout precisa ser um de {LAYOUTS}, veio {layout!r}")
+
+    split = config["split"]
+    _exigir_numero(config, "split", "proporcao_clip", minimo=0.2, maximo=0.8)
+    for chave in ("diretorio", "categoria"):
+        if not isinstance(split.get(chave), str):
+            raise TemplateInvalido(f"split.{chave} precisa ser texto")
+    leg = split["legenda"]
+    for chave, minimo, maximo in (("alinhamento", 1, 9), ("margem_vertical", 0, None)):
+        valor = leg.get(chave)
+        if isinstance(valor, bool) or not isinstance(valor, (int, float)):
+            raise TemplateInvalido(f"split.legenda.{chave} precisa ser número, veio {valor!r}")
+        if valor < minimo or (maximo is not None and valor > maximo):
+            raise TemplateInvalido(f"split.legenda.{chave} fora da faixa, veio {valor}")
+    sep = split["separador"]
+    valor = sep.get("espessura")
+    if isinstance(valor, bool) or not isinstance(valor, (int, float)) or valor < 0:
+        raise TemplateInvalido(f"split.separador.espessura precisa ser número >= 0, veio {valor!r}")
+    cor_ass(sep["cor"])
+
+    variantes = config["variantes"]
+    pesos = variantes.get("pesos")
+    if not isinstance(pesos, dict):
+        raise TemplateInvalido("variantes.pesos precisa ser um objeto")
+    for nome, peso in pesos.items():
+        layout_v, _, categoria = str(nome).partition(":")
+        if layout_v not in LAYOUTS:
+            raise TemplateInvalido(
+                f"variantes.pesos[{nome!r}]: layout precisa ser um de {LAYOUTS}"
+            )
+        if layout_v == "full" and categoria:
+            raise TemplateInvalido(f"variantes.pesos[{nome!r}]: 'full' não tem categoria")
+        if layout_v == "split" and not (categoria or split["categoria"]):
+            raise TemplateInvalido(
+                f"variantes.pesos[{nome!r}]: sem categoria (use 'split:<categoria>' "
+                "ou defina split.categoria)"
+            )
+        if isinstance(peso, bool) or not isinstance(peso, (int, float)) or peso < 0:
+            raise TemplateInvalido(
+                f"variantes.pesos[{nome!r}] precisa ser número >= 0, veio {peso!r}"
+            )
+    if pesos and not any(p > 0 for p in pesos.values()):
+        raise TemplateInvalido("variantes.pesos: todos os pesos são zero")
+    if layout == "split" and not pesos and not split["categoria"]:
+        raise TemplateInvalido("layout 'split' exige split.categoria")
+
+
+def _validar_capa(capa):
+    if not isinstance(capa.get("ativa"), bool):
+        raise TemplateInvalido(
+            f"capa.ativa precisa ser true ou false, veio {capa.get('ativa')!r}")
+    valor = capa.get("tamanho_max")
+    if isinstance(valor, bool) or not isinstance(valor, (int, float)) or valor < 20:
+        raise TemplateInvalido(
+            f"capa.tamanho_max precisa ser número >= 20, veio {valor!r}")
+    valor = capa.get("contorno_espessura")
+    if isinstance(valor, bool) or not isinstance(valor, (int, float)) or valor < 0:
+        raise TemplateInvalido(
+            f"capa.contorno_espessura precisa ser número >= 0, veio {valor!r}")
+    for chave in ("cor", "caixa_cor"):
+        cor_ass(capa[chave])
+    if not isinstance(capa.get("fonte"), str) or not capa["fonte"].strip():
+        raise TemplateInvalido("capa.fonte precisa ser texto")
+    frame = capa.get("frame_inicial")
+    if not isinstance(frame, dict) or not isinstance(frame.get("ativo"), bool):
+        raise TemplateInvalido(
+            "capa.frame_inicial.ativo precisa ser true ou false")
+    dur = frame.get("duracao_s")
+    if isinstance(dur, bool) or not isinstance(dur, (int, float)) \
+            or not 0.0 < dur <= 1.0:
+        raise TemplateInvalido(
+            f"capa.frame_inicial.duracao_s precisa estar em (0, 1], veio {dur!r}")
+
+
+def _validar_grafico(g):
+    if not isinstance(g.get("ativo"), bool):
+        raise TemplateInvalido(
+            f"grafico.ativo precisa ser true ou false, veio {g.get('ativo')!r}")
+    if g.get("fundo") not in ("desfoque", "solido"):
+        raise TemplateInvalido(
+            f"grafico.fundo precisa ser 'desfoque' ou 'solido', "
+            f"veio {g.get('fundo')!r}")
+    cor_ass(g["cor_solida"])
+    for chave, minimo, maximo in (
+            ("desfoque_sigma", 0.0, 200.0), ("transicao_s", 0.05, 1.0),
+            ("min_duracao_s", 0.5, 60.0), ("maximo_por_clip", 1, 10),
+            ("amostras_por_s", 0.5, 8.0), ("largura_minima", 0.1, 1.0)):
+        valor = g.get(chave)
+        if isinstance(valor, bool) or not isinstance(valor, (int, float)):
+            raise TemplateInvalido(
+                f"grafico.{chave} precisa ser número, veio {valor!r}")
+        if valor < minimo or valor > maximo:
+            raise TemplateInvalido(
+                f"grafico.{chave} precisa estar em [{minimo}, {maximo}], "
+                f"veio {valor}")
+
+
+def _validar_multi(m):
+    if not isinstance(m.get("ativo"), bool):
+        raise TemplateInvalido(
+            f"multi.ativo precisa ser true ou false, veio {m.get('ativo')!r}")
+    if m.get("fundo") not in ("desfoque", "solido"):
+        raise TemplateInvalido(
+            f"multi.fundo precisa ser 'desfoque' ou 'solido', "
+            f"veio {m.get('fundo')!r}")
+    for chave, minimo, maximo, inteiro in (
+            ("min_rosto", 0.01, 0.5, False), ("histerese_entrada", 1, 30, True),
+            ("histerese_saida", 1, 30, True), ("amostras_por_s", 0.5, 8.0, False),
+            ("maximo_por_clip", 1, 10, True)):
+        valor = m.get(chave)
+        if isinstance(valor, bool) or not isinstance(valor, (int, float)):
+            raise TemplateInvalido(
+                f"multi.{chave} precisa ser número, veio {valor!r}")
+        if inteiro and int(valor) != valor:
+            raise TemplateInvalido(
+                f"multi.{chave} precisa ser inteiro, veio {valor!r}")
+        if valor < minimo or valor > maximo:
+            raise TemplateInvalido(
+                f"multi.{chave} precisa estar em [{minimo}, {maximo}], "
+                f"veio {valor}")
 
 
 def _validar_sfx(sfx):
@@ -176,6 +380,95 @@ def _validar_sfx(sfx):
         )
     if not isinstance(sfx.get("palavras_chave"), list):
         raise TemplateInvalido("sfx.palavras_chave precisa ser uma lista")
+
+
+def _numero(secao, nome, chave, minimo=None, maximo=None, exclusivo=False):
+    valor = secao.get(chave)
+    if isinstance(valor, bool) or not isinstance(valor, (int, float)):
+        raise TemplateInvalido(f"efeitos.{nome}.{chave} precisa ser número, veio {valor!r}")
+    if minimo is not None and (valor <= minimo if exclusivo else valor < minimo):
+        raise TemplateInvalido(
+            f"efeitos.{nome}.{chave} precisa ser {'>' if exclusivo else '>='} "
+            f"{minimo}, veio {valor}"
+        )
+    if maximo is not None and valor > maximo:
+        raise TemplateInvalido(f"efeitos.{nome}.{chave} precisa ser <= {maximo}, veio {valor}")
+
+
+def _validar_efeitos(ef):
+    for nome in ("zoom", "flash", "vinheta", "barra", "voz", "ducking", "pad",
+                 "shutter", "iris", "whip_pan", "glitch", "cadencia",
+                 "limiter", "sfx_visuais"):
+        secao = ef.get(nome)
+        if not isinstance(secao, dict):
+            raise TemplateInvalido(f"efeitos.{nome} precisa ser um objeto")
+        if not isinstance(secao.get("ativo"), bool):
+            raise TemplateInvalido(
+                f"efeitos.{nome}.ativo precisa ser true ou false, veio {secao.get('ativo')!r}"
+            )
+
+    zoom = ef["zoom"]
+    if zoom["modo"] not in ("picos", "intervalo"):
+        raise TemplateInvalido(
+            f"efeitos.zoom.modo precisa ser 'picos' ou 'intervalo', veio {zoom['modo']!r}"
+        )
+    _numero(zoom, "zoom", "fator", minimo=1.0)
+    _numero(zoom, "zoom", "fator", maximo=1.5)
+    _numero(zoom, "zoom", "duracao_s", minimo=0.0, exclusivo=True)
+    _numero(zoom, "zoom", "intervalo_s", minimo=0.0, exclusivo=True)
+    _numero(zoom, "zoom", "espacamento_minimo_s", minimo=0.0)
+    _numero(zoom, "zoom", "maximo_por_clip", minimo=0)
+
+    flash = ef["flash"]
+    _numero(flash, "flash", "intensidade", minimo=0.0, maximo=1.0)
+    _numero(flash, "flash", "duracao_s", minimo=0.0, exclusivo=True)
+    _numero(ef["vinheta"], "vinheta", "angulo", minimo=0.0, maximo=1.5707)
+    barra = ef["barra"]
+    _numero(barra, "barra", "altura", minimo=1)
+    cor_ass(barra["cor"])
+    if barra["posicao"] not in ("base", "topo"):
+        raise TemplateInvalido(
+            f"efeitos.barra.posicao precisa ser 'base' ou 'topo', veio {barra['posicao']!r}"
+        )
+
+    for nome in ("shutter", "iris", "whip_pan", "glitch"):
+        _numero(ef[nome], nome, "intensidade", minimo=0.0, maximo=1.0)
+        _numero(ef[nome], nome, "duracao_s", minimo=0.15, maximo=0.4)
+    _numero(ef["cadencia"], "cadencia", "espacamento_minimo_s", minimo=0.5)
+    _numero(ef["cadencia"], "cadencia", "maximo_por_clip", minimo=0)
+
+    _numero(ef["limiter"], "limiter", "teto_db", minimo=-12.0, maximo=0.0)
+    sv = ef["sfx_visuais"]
+    _numero(sv, "sfx_visuais", "volume", minimo=0.0, maximo=2.0)
+    from editing import gerar_sfx
+    if not isinstance(sv.get("categorias"), dict) or not all(
+            k in gerar_sfx.SONS_VISUAIS and isinstance(v, bool)
+            for k, v in sv["categorias"].items()):
+        raise TemplateInvalido(
+            "efeitos.sfx_visuais.categorias precisa mapear "
+            f"{gerar_sfx.SONS_VISUAIS} para true/false")
+    if not isinstance(sv.get("mapa"), dict) or not all(
+            k in ("shutter", "iris", "whip_pan", "glitch", "flash", "zoom")
+            and v in gerar_sfx.SONS_VISUAIS for k, v in sv["mapa"].items()):
+        raise TemplateInvalido(
+            "efeitos.sfx_visuais.mapa precisa ligar efeito -> um de "
+            f"{gerar_sfx.SONS_VISUAIS}")
+
+    _numero(ef["voz"], "voz", "lufs", minimo=-40.0, maximo=-5.0)
+    duck = ef["ducking"]
+    _numero(duck, "ducking", "limiar", minimo=0.0, exclusivo=True, maximo=1.0)
+    _numero(duck, "ducking", "razao", minimo=1.0)
+    _numero(duck, "ducking", "ataque_ms", minimo=0.01)
+    _numero(duck, "ducking", "liberacao_ms", minimo=0.01)
+    pad = ef["pad"]
+    _numero(pad, "pad", "volume", minimo=0.0)
+    if "{categoria}" not in str(pad.get("arquivo", "")) and not str(pad.get("arquivo", "")).strip():
+        raise TemplateInvalido("efeitos.pad.arquivo está vazio")
+    valor = ef.get("teto_sfx_abaixo_da_voz_db")
+    if isinstance(valor, bool) or not isinstance(valor, (int, float)) or valor < 0:
+        raise TemplateInvalido(
+            f"efeitos.teto_sfx_abaixo_da_voz_db precisa ser número >= 0, veio {valor!r}"
+        )
 
 
 def carregar(caminho=None):

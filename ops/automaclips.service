@@ -1,0 +1,40 @@
+# EXEMPLO — nada aqui é instalado automaticamente.
+#
+# Orquestrador em modo laço (APScheduler): cada etapa no próprio ritmo
+# (sourcing 6 h, pipeline/editing 1 h, publish 15 min). É a forma recomendada
+# no mini PC: respeita os intervalos por etapa e o systemd o levanta se cair.
+#
+# Instalar (como root, ajustando User e os caminhos):
+#   cp ops/automaclips.service /etc/systemd/system/automaclips.service
+#   systemctl daemon-reload
+#   systemctl enable --now automaclips.service
+#   journalctl -u automaclips -f
+#
+# A trava de processo único (orquestrador.lock) impede duas instâncias: um
+# `systemctl start` repetido ou um timer sobreposto sai sem fazer nada.
+# O estado fica em ops/status.json (ver README, "Rodando sozinho").
+
+[Unit]
+Description=automaclips — orquestrador de clips (modo laço)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=automaclips
+WorkingDirectory=/opt/automaclips
+Environment=TZ=America/Sao_Paulo
+# Python oficial do projeto (README: .venv313).
+ExecStart=/opt/automaclips/.venv313/bin/python -m orchestrator.main_loop
+Restart=always
+RestartSec=30
+# Um ciclo longo (render) precisa de tempo para terminar no stop.
+TimeoutStopSec=120
+# Prioridade baixa: o render não deve travar o resto do mini PC.
+Nice=10
+# Não escreve fora do projeto.
+ProtectSystem=full
+ReadWritePaths=/opt/automaclips
+
+[Install]
+WantedBy=multi-user.target

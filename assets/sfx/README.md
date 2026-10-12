@@ -41,3 +41,13 @@ com a mixagem da plataforma por cima, o efeito soa mais alto do que no fone.
 
 Fontes gratuitas com licença permissiva: freesound.org (confira a licença de
 cada arquivo), Pixabay Sound Effects, YouTube Audio Library.
+
+## Pads ambiente (`efeitos.pad`)
+
+`python -m editing.gerar_sfx` também escreve `pad_<categoria>.wav` (full,
+slime, satisfatorio, parkour, asmr_geometrico): cama de 24 s em loop sem emenda,
+sintetizada com numpy, normalizada em -28 LUFS (12 dB sob a voz em -16). Com
+`efeitos.pad.ativo`, o render exige o pad de cada categoria que a fila pode
+sortear e falha antes do primeiro clip se faltar algum. O ducking
+(`efeitos.ducking`) abaixa efeitos e pad enquanto a voz fala. Ver o comentário
+da seção `efeitos` em `editing/template_config.json`.

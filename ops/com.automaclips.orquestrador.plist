@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  EXEMPLO — nada aqui é instalado automaticamente.
+
+  launchd (macOS): orquestrador em modo laço, reiniciado se cair.
+
+    cp ops/com.automaclips.orquestrador.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.automaclips.orquestrador.plist
+    launchctl list | grep automaclips
+    tail -f /opt/automaclips/ops/orquestrador.log
+
+  Ajuste ProgramArguments e WorkingDirectory para o caminho real. A trava de
+  processo único evita duas instâncias. Para um ciclo por hora em vez do laço,
+  troque KeepAlive por StartInterval=3600 e acrescente o argumento
+  uma-vez (com dois hifens na frente) a ProgramArguments.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.automaclips.orquestrador</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/automaclips/.venv313/bin/python</string>
+    <string>-m</string>
+    <string>orchestrator.main_loop</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/opt/automaclips</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>TZ</key>
+    <string>America/Sao_Paulo</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <!-- Espera antes de reiniciar, para um erro de configuração não girar em
+       laço apertado. -->
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <key>Nice</key>
+  <integer>10</integer>
+
+  <key>StandardOutPath</key>
+  <string>/opt/automaclips/ops/orquestrador.log</string>
+  <key>StandardErrorPath</key>
+  <string>/opt/automaclips/ops/orquestrador.log</string>
+</dict>
+</plist>

@@ -45,6 +45,12 @@ clips/
 assets/sfx/*
 !assets/sfx/README.md
 
+# Vídeos de preenchimento do layout split: seus, licenciados individualmente.
+assets/filler/*
+!assets/filler/README.md
+# O manifesto (origem/licença de cada arquivo) é versionado; os vídeos não.
+!assets/filler/MANIFESTO.json
+
 # Bancada de teste local: video sintetico, transcricao e render de
 # validacao. Reproduzivel por teste_local/primeiro_clip.py.
 teste_local/
@@ -72,3 +78,10 @@ clips.db*
 # Provedor de PO token (bgutil): node + servidor + venv do yt-dlp novo. Reconstruível (README).
 .pot/
 .venv313/
+
+# Estado de execução do orquestrador (ops/status.json) e a trava de processo
+# único. São da máquina, não do projeto.
+ops/status.json
+ops/status.json.tmp
+orquestrador.lock
+*.lock

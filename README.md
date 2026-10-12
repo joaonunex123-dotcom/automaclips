@@ -328,6 +328,171 @@ a diferença de performance entre dois clips veio do trecho ou do visual —
 **mude a versão sempre que mexer no template**, senão a série histórica mistura
 dois visuais sem deixar rastro.
 
+## Layouts A/B (full x split)
+
+O clip sai em tela cheia (`"layout": "full"`, o padrão) ou em **split**: clip em
+cima (~60%) e um vídeo de preenchimento embaixo (~40%), sem áudio — o som é
+sempre o do clip. Tudo em `editing/template_config.json`: `split.proporcao_clip`,
+`split.categoria`, `split.legenda` (posição da legenda no split) e
+`split.separador`.
+
+Para testar, dê pesos às variantes:
+
+```json
+"variantes": { "pesos": { "full": 1, "split:parkour": 1 }, "semente": "ab1" }
+```
+
+Cada clip recebe **uma** variante, por hash do `clip_id`, gravada em `renders` e
+em `resultados` (coluna `variante`); o mesmo clip nunca sai em dois layouts.
+`python -m analytics.analisar` compara views/hora (relativo à plataforma) por
+variante, mostra o n de cada uma e diz "dado insuficiente" com n < 15
+(`ANALYTICS_MIN_POR_VARIANTE`).
+
+Os preenchimentos são arquivos seus em `assets/filler/<categoria>/` — o sistema
+não baixa nada, e categoria vazia só desativa a variante (com log). Formato e
+aviso de licença: [assets/filler/README.md](assets/filler/README.md).
+
+## Capa do clip
+
+Desligada por padrão (`capa.ativa: false` no `template_config.json`). Ligada,
+cada clip ganha uma pasta `<nome>_capa/` ao lado do `.mp4` com
+`capa_1080x1920.png` (vertical) e `capa_1280x720.png` (horizontal): o melhor
+quadro do trecho com o título curto em fonte grande, sobre uma caixa escura.
+
+O quadro é pontuado, não sorteado — nitidez (variância do Laplaciano), rosto
+(OpenCV, Haar), brilho aceitável e penalidade para quadro de corte. Sem OpenCV
+degrada para nitidez + brilho; sem amostragem usa o meio do trecho. Falha na
+capa nunca derruba o render. O caminho vertical fica em `renders.capa_path`.
+
+| chave | efeito |
+| --- | --- |
+| `capa.ativa` | gera os PNGs ao lado do clip (o vídeo não muda) |
+| `capa.frame_inicial.ativo` | põe o quadro de título nos primeiros `duracao_s` (0,3 s) **do vídeo** |
+| `YOUTUBE_ENVIAR_CAPA=true` (.env) | depois do upload chama `thumbnails.set` (50 unidades de quota) |
+
+**Limitação:** o YouTube costuma ignorar capa personalizada em Shorts — a shelf
+usa um quadro do próprio vídeo — e `thumbnails.set` exige canal verificado.
+Por isso existe `capa.frame_inicial`: o quadro de título dentro dos primeiros
+0,3 s é o que a plataforma tende a pegar. O custo é um flash de pôster no
+começo do clip.
+
+## Modo gráfico (slides, gráficos, tabelas)
+
+O crop 9:16 central joga fora ~68% da largura do 16:9: num gráfico, o eixo e
+metade das barras somem. Com `grafico.ativo: true` o clip detecta os trechos em
+que a fonte é conteúdo (não pessoa) e mostra o quadro **inteiro**, centralizado,
+sobre fundo preenchido, com fade de 0,25 s entre o enquadramento normal e o
+gráfico.
+
+| chave | valores |
+| --- | --- |
+| `grafico.ativo` | `false` (padrão) / `true` |
+| `grafico.fundo` | `"desfoque"` (cópia desfocada da cena) ou `"solido"` (`cor_solida`) |
+| `grafico.transicao_s` | duração do fade (0,05 a 1,0) |
+| `grafico.largura_minima` | 0,70: abaixo disso o recorte tira só a margem vazia e amplia |
+
+O pedido original chamava a chave de `layout.grafico.fundo`; como `layout` já é
+uma string (`full`/`split`) no template, a seção ficou em `grafico`.
+
+Detecção local (sem chamada paga), sobre quadros amostrados a 2/s: sem rosto,
+fundo plano, poucas cores dominantes e linhas retas alinhadas aos eixos —
+os quatro juntos. Calibrada com um gráfico sintético contra 107 quadros de
+uma reportagem real (nenhum falso positivo). Sem detecção confiável o clip sai
+como antes. Um modelo de visão não está ligado: o `llm_client` não aceita
+imagem; `grafico.detectar(..., confirmar=...)` é o gancho.
+
+## Modo multi (2+ pessoas no quadro)
+
+Com duas pessoas afastadas, o crop 9:16 cai no vão entre elas e corta as duas.
+Com `multi.ativo: true` o clip detecta todos os rostos (cascatas Haar do
+OpenCV, altura mínima `multi.min_rosto` do quadro), calcula a caixa que os
+envolve (com margem) e, quando ela **não cabe** na janela 9:16, mostra o quadro
+inteiro, com o mesmo fit/contain, fundo e fade do modo gráfico. Quando cabe, o
+crop centra na caixa, nunca no vão. Prioridade: gráfico > multi > single.
+
+| chave | efeito |
+|---|---|
+| `multi.ativo` | `true` no template (`false` desliga) |
+| `multi.fundo` | `"solido"` (padrão, usa `grafico.cor_solida`) ou `"desfoque"` |
+| `multi.min_rosto` | 0,06: rostos menores (fundo, plateia) são ignorados |
+| `multi.histerese_entrada` / `_saida` | 3 / 4 amostras seguidas para trocar de modo |
+
+O pedido chamava as chaves de `layout.multi.*`; como `layout` é uma string
+(`full`/`split`), a seção é `multi`. A legenda desce se o quadro inteiro a
+alcançaria. Depuração: `<clip>_multi.json` ao lado do .mp4. Bancada:
+`python -m tools.multi_local --fonte arquivo.mp4`.
+
+## Biblioteca de transições
+
+Tudo gerado por filtros nativos do ffmpeg (nada externo) e **desligado por
+padrão**. Cada efeito é `efeitos.<nome>` no `template_config.json`, com
+`ativo`, `intensidade` (0..1) e `duracao_s` (0,15 a 0,4 s):
+
+| efeito | o que é | notas |
+| --- | --- | --- |
+| `shutter` | cortina de 6 lâminas horizontais que fecham e reabrem | `drawbox` por lâmina |
+| `iris` | máscara circular que fecha e reabre | máscara em 1/10 da resolução, com alfa |
+| `whip_pan` | borrão horizontal de câmera (3 degraus) | `avgblur` |
+| `glitch` | franja de cor + saturação, leve | `chromashift` (em YUV) |
+| `flash` | clarão que decai | já existia |
+| `zoom` | punch-in (zoom punch) | já existia; `fator` faz o papel de intensidade |
+
+`flash` e `zoom` foram **reaproveitados**, não duplicados. Ligar qualquer
+transição nova (ou `efeitos.cadencia.ativo`) faz o planejador decidir também os
+instantes deles, para valer a regra: **no máximo 1 efeito a cada 4 s**
+(`cadencia.espacamento_minimo_s`) e **variando o tipo** (nunca o mesmo em
+seguida quando há alternativa). Gatilhos, por prioridade: abertura (só
+`flash`) e virada do hook; entrada de gráfico; picos de energia; saída de
+gráfico. Com só `flash`/`zoom` ligados e a cadência desligada vale o
+comportamento antigo, byte a byte.
+
+Duas armadilhas de custo, medidas: `rgbashift` força o grafo inteiro por RGB e
+levou o render de um clip de 30 s de 10 s para 46 s — o glitch usa
+`chromashift`; e um `geq` por pixel em 1080x1920 custava +9 s — a íris é uma
+máscara em baixa resolução ampliada com bicúbico.
+
+## SFX dos efeitos visuais e mixagem
+
+`efeitos.sfx_visuais` (desligado) faz cada efeito visual disparar um som
+**sintetizado por numpy** (`editing/gerar_sfx.py`; nenhum arquivo de terceiros):
+
+| som | acompanha | forma |
+| --- | --- | --- |
+| `whoosh` | `whip_pan` | ruído filtrado com varredura de 400 Hz a 3,5 kHz |
+| `shutter` | `shutter` | dois cliques de obturador + tum de 180 Hz |
+| `pop` | `glitch` | bolha: seno de 700 a 180 Hz |
+| `impacto` | `flash`, `zoom` | queda de 120 a 38 Hz com cauda |
+| `riser` | `iris` | subida de 0,8 s, ataque no fim |
+
+`efeitos.sfx_visuais.categorias` liga/desliga cada som e `mapa` troca o
+efeito -> som. Os arquivos são gerados na primeira vez em `sfx.diretorio`.
+
+**Sincronia:** cada som tem uma âncora (o instante em que ele "bate", medido
+no sinal) e o arquivo começa em `momento_chave_do_efeito - ancora`; se isso
+cairia antes do clip, o início do arquivo é cortado em vez de atrasado.
+Verificado num render real: o clique aparece no áudio a 3,0 s ± 1,5 quadro.
+
+**Mixagem** (`efeitos.voz`, `ducking`, `limiter` — todos desligados):
+voz normalizada a -16 LUFS (loudnorm em duas passadas), cada SFX limitado a
+no máximo `teto_sfx_abaixo_da_voz_db` (8 dB) abaixo da voz, ducking por
+sidechain quando há fala e `alimiter` no master (`limiter.teto_db`, -1,5).
+
+## Bancada local de qualidade
+
+```bash
+python -m tools.qualidade_local --fonte ARQUIVO.mp4 --inicio 75 --duracao 30 \
+    --saida teste_local/qualidade --repeticoes 2
+```
+
+Gera `01_base.mp4` .. `06_efeitos_visuais_sonoros.mp4`, um frame de cada em
+`frames/`, `comparativo.mp4` (grade lado a lado) e `relatorio.json` com
+resolução, duração, LUFS (ebur128), tempo de render e os efeitos ligados. Cada
+vídeo passa pelo caminho real (`editar.renderizar_clip`, com banco temporário).
+Como a fonte local não tem gráfico, o script insere um gráfico sintético de
+1920x1080 no meio do trecho. Não chama LLM, transcrição nem publica; a legenda é
+um texto fixo. Roda também o teste da limpeza num diretório temporário, com
+ffmpeg real. `teste_local/` é ignorado pelo git.
+
 ## Efeitos sonoros
 
 Desligados por padrão: dependem de arquivos de áudio que não vêm no
@@ -427,6 +592,32 @@ duração degrada para views/hora por faixa — pior, porque mede alcance e não
 quanto o clip segurou, mas continua sendo medição e não palpite.
 `ANALYTICS_RETENCAO=1` liga, depois de autorizar o escopo extra.
 
+## Limpeza do vídeo-fonte e espaço em disco
+
+Um podcast baixado pesa gigabytes; os clips dele, dezenas de megabytes. Num
+mini PC 24/7 o disco acaba antes da fila. `pipeline/limpeza.py` apaga o
+vídeo-fonte e os intermediários (áudio, fatias de áudio, temporários do
+yt-dlp, `.ass`) **depois** que todos os clips daquele vídeo estão renderizados e
+validados.
+
+```bash
+python -m pipeline.limpeza --simular   # lista o que seria apagado; não toca em nada
+python -m pipeline.limpeza             # apaga (exige LIMPAR_FONTE_APOS_CLIPS=true)
+```
+
+| variável (.env) | padrão | efeito |
+| --- | --- | --- |
+| `LIMPAR_FONTE_APOS_CLIPS` | `false` | liga a limpeza real; o laço principal a roda após cada etapa de edição |
+| `LIMPEZA_ESPACO_MIN_GB` | `10` | abaixo disso o pipeline pausa os downloads **novos** e registra no log (0 desliga) |
+
+Trava de segurança, por arquivo: precisa ser arquivo comum, **não** link
+simbólico, e o `realpath` precisa estar dentro de `CLIPS_DOWNLOADS_DIR` (ou, para
+os `.ass`, do diretório de render). Fora disso é recusado e logado. Nunca
+apaga: clips renderizados, capas, `clips.db`, transcrições (o metadado que o
+agendamento usa) nem arquivo que o banco aponte como render. O resultado fica em
+`midia.fonte_apagada_em` e `midia.fonte_bytes_liberados`. Uma fonte apagada
+conta como não baixada: reprocessar o vídeo baixa de novo.
+
 ## Rodando sozinho
 
 ```bash
@@ -451,6 +642,30 @@ Prefira `--uma-vez` sob o Task Scheduler ou cron: o modo residente é mais
 simples de começar, mas se o processo morrer ninguém o levanta — e num
 pipeline que publica em horário marcado isso é perder a janela sem aviso.
 `--uma-vez` também não precisa do APScheduler instalado.
+
+### 24/7 no mini PC: fila, cadência e status
+
+* **5 posts por dia** (`POSTS_POR_DIA=5`), em `HORARIOS_PADRAO` =
+  08:00, 11:15, 14:30, 17:45, 21:00 (a cada 3h15, acima do `INTERVALO_MINIMO_MIN`
+  de 120 min). O horário é lido no **relógio local**: o SO do mini PC precisa
+  estar em `America/Sao_Paulo` (`FUSO_AGENDAMENTO`); o log e o `status.json`
+  avisam se não estiver. O sexto clip do dia vai para o dia seguinte.
+* **Quota do YouTube:** 5 uploads = 5 x 1.600 = **8.000** de 10.000. A
+  `YOUTUBE_QUOTA_MARGEM` (500) mantém o sexto upload recusado, e sobram **2.000
+  unidades** (1.750 com `YOUTUBE_ENVIAR_CAPA`, 50 por capa) para o sourcing e o
+  resto do projeto. O contador é o do banco (`quota_api`, dia do Pacífico).
+* **Aquecimento:** inalterado — `AQUECIMENTO_POSTS_DIA` (padrão 1; use 2 para
+  1-2 posts) por `AQUECIMENTO_DIAS` (3) contados do primeiro post real. Os
+  clips agendados além do teto ficam `agendado` e saem nos dias seguintes.
+* **Fila de clips prontos:** com menos de `FILA_MINIMA_CLIPS` (8) clips
+  renderizados e ainda não publicados, o laço inicia `FILA_VIDEOS_POR_CICLO`
+  (1) vídeo novo, do maior score; acima disso só termina o que já começou. `0`
+  desliga e volta a processar tudo. `ORCAMENTO_USD` atingido para o pipeline.
+* **Instância única + reinício seguro:** trava `orquestrador.lock` (flock) e
+  nenhum estado em memória — vídeo `baixado`/`transcrito` é retomado.
+* **`ops/status.json`:** última execução, fila, quota, espaço livre, vencimento
+  do token (`YOUTUBE_TOKEN_VENCE_EM`) e `alertas`. Exemplos de systemd e launchd
+  em [ops/](ops/README.md).
 
 ## Vários canais
 
@@ -672,6 +887,7 @@ analytics/recalibrate.py     as quatro recalibrações
 analytics/analisar.py        mede e recalibra
 
 assets/sfx/                  os arquivos de efeito (fora do git)
+assets/filler/               vídeos de preenchimento do layout split (fora do git)
 ```
 
 `fila_clips` guarda o vídeo-FONTE; `midia` os artefatos baixados; `clips` os

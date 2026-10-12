@@ -163,3 +163,25 @@ def enviar(cliente, caminho, titulo, descricao, tags=None, categoria=None,
     if not video_id:
         raise ErroYouTubeUpload(f"upload sem id na resposta: {resposta!r}")
     return video_id, f"https://www.youtube.com/watch?v={video_id}"
+
+
+def definir_thumbnail(cliente, video_id, caminho, criar_midia=None):
+    """videos/thumbnails.set. Devolve True se o YouTube aceitou.
+
+    Falha NÃO é fatal para quem chama: o vídeo já está no ar, e a capa é
+    acessório. Shorts costumam ignorar a capa personalizada (a shelf usa um
+    quadro do vídeo) e canal não verificado recebe 403 — ambos viram aviso.
+    """
+    if not caminho or not os.path.exists(caminho):
+        raise ErroYouTubeUpload(f"capa não encontrada: {caminho}")
+    if criar_midia is None:
+        from googleapiclient.http import MediaFileUpload
+
+        def criar_midia(arquivo):
+            return MediaFileUpload(arquivo, mimetype="image/png")
+    try:
+        cliente.thumbnails().set(
+            videoId=video_id, media_body=criar_midia(caminho)).execute()
+    except Exception as e:
+        raise ErroYouTubeUpload(f"thumbnails.set de {video_id} falhou: {e}") from e
+    return True

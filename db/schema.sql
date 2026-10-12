@@ -158,7 +158,12 @@ CREATE TABLE IF NOT EXISTS midia (
     -- o ffmpeg vai cortar.
     duracao_real_s   REAL NOT NULL DEFAULT 0,
     baixado_em       TEXT,
-    transcrito_em    TEXT
+    transcrito_em    TEXT,
+    -- Limpeza do vídeo-fonte (pipeline/limpeza.py): quando o fonte e os
+    -- intermediários foram apagados, e quantos bytes isso liberou. NULL = ainda
+    -- em disco.
+    fonte_apagada_em      TEXT,
+    fonte_bytes_liberados INTEGER NOT NULL DEFAULT 0
 );
 
 -- Um trecho candidato a virar clip vertical. Sai do highlight_detect (Claude
@@ -277,7 +282,12 @@ CREATE TABLE IF NOT EXISTS renders (
     -- inteira sem deixar rastro.
     template_versao TEXT NOT NULL DEFAULT '',
     duracao_s       REAL NOT NULL DEFAULT 0,
-    renderizado_em  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+    renderizado_em  TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    -- Layout A/B: 'full' ou 'split:<categoria>' (editing/layout.py). Um clip
+    -- tem uma variante só; é a que a etapa 7 compara.
+    variante        TEXT NOT NULL DEFAULT 'full',
+    -- Capa (thumbnail) vertical do clip, ao lado do .mp4. Vazio = sem capa.
+    capa_path       TEXT NOT NULL DEFAULT ''
 );
 
 -- ============================================================================
@@ -438,7 +448,11 @@ CREATE TABLE IF NOT EXISTS resultados (
     -- ranquear por views cruas premiaria post antigo, o mesmo erro que o score
     -- de sourcing existe para evitar.
     horas_publicado REAL NOT NULL DEFAULT 0,
-    coletado_em    TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+    coletado_em    TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+
+    -- Layout do render, congelado como o resto: o A/B compara views/hora por
+    -- variante (analytics/variantes.py).
+    variante       TEXT NOT NULL DEFAULT 'full'
 );
 CREATE INDEX IF NOT EXISTS ix_resultados_publicacao
     ON resultados (publicacao_id, id DESC);

@@ -167,9 +167,10 @@ def agendar_pendentes(conn, plataformas=None, limite=None, agora=None,
 # --- publicação ---------------------------------------------------------------
 
 def _enviar_youtube(conn, linha, agora=None):
-    if not quota.cabe(conn, agora=agora):
+    if not quota.cabe(conn, agora=agora, margem=settings.YOUTUBE_QUOTA_MARGEM):
         raise SemQuota(
-            f"upload custa {settings.YOUTUBE_CUSTO_UPLOAD} e sobrou "
+            f"upload custa {settings.YOUTUBE_CUSTO_UPLOAD} (+ margem "
+            f"{settings.YOUTUBE_QUOTA_MARGEM}) e sobrou "
             f"{quota.restante(conn, agora=agora)} — {quota.resumo(conn, agora=agora)}"
         )
     cliente = youtube_mod.construir_cliente()
@@ -180,7 +181,33 @@ def _enviar_youtube(conn, linha, agora=None):
     # Registrada DEPOIS do sucesso: quota, ao contrário de dinheiro, não volta,
     # e reservar por uma chamada que falhou custa um upload que caberia.
     quota.registrar(conn, agora=agora)
+    _enviar_capa(conn, cliente, video_id, linha, agora)
     return video_id, url
+
+
+def _enviar_capa(conn, cliente, video_id, linha, agora=None):
+    """Passo opcional (YOUTUBE_ENVIAR_CAPA, desligado): nunca derruba o post."""
+    if not settings.YOUTUBE_ENVIAR_CAPA:
+        return False
+    capa = ""
+    try:
+        capa = linha["capa_path"] or ""
+    except (KeyError, IndexError):
+        pass
+    if not capa:
+        return False
+    custo = settings.YOUTUBE_CUSTO_THUMBNAIL
+    if not quota.cabe(conn, custo=custo, agora=agora):
+        log.warning("Capa de %s não enviada: sem quota (%s).", video_id,
+                    quota.resumo(conn, agora=agora))
+        return False
+    try:
+        youtube_mod.definir_thumbnail(cliente, video_id, capa)
+    except Exception as e:
+        log.warning("Capa de %s não aceita pelo YouTube: %s", video_id, e)
+        return False
+    quota.registrar(conn, custo=custo, agora=agora)
+    return True
 
 
 def _enviar_instagram(conn, linha, agora=None):

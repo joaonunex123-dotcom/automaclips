@@ -35,6 +35,9 @@ from datetime import datetime
 import settings
 from db import repositorio
 from editing import editar
+from orchestrator import fila as fila_mod
+from orchestrator import status as status_mod
+from orchestrator import trava as trava_mod
 from pipeline import processar
 from publish import preflight
 from publish import publicar
@@ -58,11 +61,41 @@ def etapa_sourcing(conn):
 
 
 def etapa_pipeline(conn):
-    return processar.processar_fila(conn)
+    """Termina o que está em curso e só inicia vídeo novo se a fila está baixa.
+
+    Com FILA_MINIMA_CLIPS=0 a guarda some e vale o comportamento antigo
+    (processar toda a fila pendente).
+    """
+    if not settings.FILA_MINIMA_CLIPS:
+        return processar.processar_fila(conn)
+    return fila_mod.reabastecer(conn)
 
 
 def etapa_editing(conn):
-    return editar.renderizar_fila(conn)
+    resultado = editar.renderizar_fila(conn)
+    _limpar_fontes(conn)
+    return resultado
+
+
+def _limpar_fontes(conn):
+    """Apaga o vídeo-fonte dos podcasts prontos. Só com a flag ligada.
+
+    Nunca derruba a etapa de edição: falha de limpeza é aviso, e o render já
+    aconteceu.
+    """
+    if not settings.LIMPAR_FONTE_APOS_CLIPS:
+        return {}
+    try:
+        from pipeline import limpeza
+        resultado = limpeza.limpar(conn, simular=False)
+    except Exception as e:
+        log.warning("Limpeza do vídeo-fonte falhou: %s", e)
+        return {}
+    liberado = sum(r["bytes"] for r in resultado.values())
+    if liberado:
+        log.info("Limpeza: %.1f MB liberados em %d vídeo(s).",
+                 liberado / 1e6, len(resultado))
+    return resultado
 
 
 def etapa_publish(conn):
@@ -108,6 +141,24 @@ ETAPAS = (
 
 # --- execução -----------------------------------------------------------------
 
+# Último resultado de cada etapa, para o ops/status.json. Estado de
+# observação, não de controle: a fonte de verdade do trabalho é o clips.db.
+_ESTADO = {"inicio": None, "fim": None, "etapas": {}}
+
+
+def _escrever_status(conn):
+    """Atualiza o ops/status.json. Nunca levanta: status é acessório."""
+    try:
+        dados = status_mod.montar(
+            conn, etapas=dict(_ESTADO["etapas"]), inicio=_ESTADO["inicio"],
+            fim=_ESTADO["fim"])
+        status_mod.escrever(dados)
+        for alerta in dados["alertas"]:
+            log.warning("ALERTA: %s", alerta)
+    except Exception as e:
+        log.warning("Status não atualizado: %s", e)
+
+
 def rodar_etapa(conn, nome, funcao):
     """Roda uma etapa isolada. Devolve (ok, resultado_ou_erro).
 
@@ -120,10 +171,13 @@ def rodar_etapa(conn, nome, funcao):
         resultado = funcao(conn)
     except Exception as e:
         log.exception("Etapa %s falhou: %s", nome, e)
+        _ESTADO["etapas"][nome] = {"ok": False, "erro": str(e)[:300]}
         return False, e
     duracao = time.monotonic() - inicio
     log.info("Etapa %s concluída em %.1fs: %s", nome, duracao,
              resultado or "nada a fazer")
+    _ESTADO["etapas"][nome] = {"ok": True, "erro": None,
+                               "duracao_s": round(duracao, 1)}
     return True, resultado
 
 
@@ -133,10 +187,19 @@ def ciclo(conn, etapas=None):
     log.info("--- ciclo iniciado %s ---",
              datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     resultados = {}
+    _ESTADO["inicio"] = datetime.now()
+    _ESTADO["etapas"] = {}
     for nome, funcao, _intervalo in etapas:
         ok, _resultado = rodar_etapa(conn, nome, funcao)
         resultados[nome] = ok
+    _ESTADO["fim"] = datetime.now()
+    _escrever_status(conn)
     return resultados
+
+
+def scheduler_fuso():
+    from publish import scheduler
+    return scheduler.fuso_confere()
 
 
 def avisar_do_estado(conn):
@@ -207,6 +270,7 @@ def main(argv=None):
     )
 
     conn = repositorio.conectar()
+    trava = trava_mod.Trava(settings.TRAVA_PATH)
     try:
         if args.verificar:
             problemas = preflight.verificar(conn)
@@ -214,6 +278,20 @@ def main(argv=None):
             return 1 if preflight.bloqueios(problemas) else 0
 
         avisar_do_estado(conn)
+        ok_fuso, local_h, conf_h = scheduler_fuso()
+        if not ok_fuso:
+            log.warning(
+                "O relógio do SO (UTC%+g) não está em %s (UTC%+g): HORARIOS_"
+                "PADRAO será lido no fuso errado. Ajuste o fuso da máquina.",
+                local_h, settings.FUSO_AGENDAMENTO, conf_h)
+
+        try:
+            trava.adquirir()
+        except trava_mod.OutraInstancia as e:
+            # 0 de propósito: sob timer do systemd/launchd, dois disparos
+            # sobrepostos são esperados e não são falha.
+            log.warning("%s — saindo sem fazer nada.", e)
+            return 0
 
         if args.uma_vez:
             resultados = ciclo(conn)
@@ -242,6 +320,7 @@ def main(argv=None):
             log.info("Laço encerrado.")
         return 0
     finally:
+        trava.liberar()
         conn.close()
 
 

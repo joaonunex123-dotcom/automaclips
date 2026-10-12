@@ -24,6 +24,7 @@ from pipeline import download as download_mod
 from pipeline import energia as energia_mod
 from pipeline import highlight_detect
 from pipeline import legendas_youtube
+from pipeline import limpeza as limpeza_mod
 from pipeline import select_clips
 from pipeline import transcribe as transcribe_mod
 from pipeline import whisper_api
@@ -45,10 +46,24 @@ ESTADOS_PENDENTES = (
 )
 
 
-def fila_pendente(conn, limite=None, retentar=False):
-    """Vídeos a processar, do melhor score para o pior."""
-    estados = list(ESTADOS_PENDENTES)
-    if retentar:
+# Chave de contagem (não é status de banco): o vídeo continua na fila.
+STATUS_PAUSADO_ESPACO = "pausado_sem_espaco"
+
+
+def _precisa_baixar(conn, linha):
+    midia = repositorio.midia(conn, linha["id"])
+    return not (midia and midia["video_path"] and midia["audio_path"]
+                and not midia["fonte_apagada_em"])
+
+
+def fila_pendente(conn, limite=None, retentar=False, estados=None):
+    """Vídeos a processar, do melhor score para o pior.
+
+    `estados` restringe a consulta (o orquestrador separa "em andamento" de
+    "novo"); sem ele valem todos os pendentes.
+    """
+    estados = list(estados if estados is not None else ESTADOS_PENDENTES)
+    if retentar and repositorio.STATUS_FALHA not in estados:
         estados.append(repositorio.STATUS_FALHA)
     marcadores = ", ".join("?" * len(estados))
     sql = (
@@ -65,7 +80,11 @@ def fila_pendente(conn, limite=None, retentar=False):
 def _garantir_midia(conn, linha, baixar):
     """Passo 1. Reaproveita o que já estiver baixado."""
     atual = repositorio.midia(conn, linha["id"])
-    if atual and atual["video_path"] and atual["audio_path"]:
+    # Fonte apagada pela limpeza conta como NÃO baixada: reprocessar o vídeo
+    # (ex.: --retentar) baixa de novo em vez de apontar para um arquivo que
+    # não existe mais.
+    if (atual and atual["video_path"] and atual["audio_path"]
+            and not atual["fonte_apagada_em"]):
         log.info("%s já baixado.", linha["video_id"])
         return atual
 
@@ -241,14 +260,30 @@ def processar_video(conn, linha, baixar=None, transcrever=None, detectar=None,
     return _analisar(conn, linha, midia, transcricao, detectar, picos_do_audio)
 
 
-def processar_fila(conn, limite=None, retentar=False, **injecoes):
+def processar_fila(conn, limite=None, retentar=False, estados=None,
+                   **injecoes):
     """Processa a fila inteira. Devolve {status_final: quantidade}."""
     limite = settings.PIPELINE_MAX_VIDEOS if limite is None else limite
-    pendentes = fila_pendente(conn, limite=limite, retentar=retentar)
+    pendentes = fila_pendente(conn, limite=limite, retentar=retentar,
+                              estados=estados)
     log.info("%d vídeos pendentes.", len(pendentes))
 
     contagem = {}
+    espaco_avisado = False
     for linha in pendentes:
+        if _precisa_baixar(conn, linha) and limpeza_mod.espaco_insuficiente():
+            # Pausa SÓ os downloads novos; o que já está em disco segue.
+            if not espaco_avisado:
+                log.warning(
+                    "Pouco espaço em disco (%.1f GB livres < %.1f GB): "
+                    "downloads novos pausados. Libere espaço ou rode "
+                    "`python -m pipeline.limpeza --simular`.",
+                    limpeza_mod.espaco_livre_gb(),
+                    settings.LIMPEZA_ESPACO_MIN_GB)
+                espaco_avisado = True
+            contagem[STATUS_PAUSADO_ESPACO] = (
+                contagem.get(STATUS_PAUSADO_ESPACO, 0) + 1)
+            continue
         try:
             selecionados = processar_video(conn, linha, **injecoes)
         except download_mod.FFmpegAusente as e:
