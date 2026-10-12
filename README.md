@@ -401,6 +401,27 @@ uma reportagem real (nenhum falso positivo). Sem detecção confiável o clip sa
 como antes. Um modelo de visão não está ligado: o `llm_client` não aceita
 imagem; `grafico.detectar(..., confirmar=...)` é o gancho.
 
+## Modo multi (2+ pessoas no quadro)
+
+Com duas pessoas afastadas, o crop 9:16 cai no vão entre elas e corta as duas.
+Com `multi.ativo: true` o clip detecta todos os rostos (cascatas Haar do
+OpenCV, altura mínima `multi.min_rosto` do quadro), calcula a caixa que os
+envolve (com margem) e, quando ela **não cabe** na janela 9:16, mostra o quadro
+inteiro, com o mesmo fit/contain, fundo e fade do modo gráfico. Quando cabe, o
+crop centra na caixa, nunca no vão. Prioridade: gráfico > multi > single.
+
+| chave | efeito |
+|---|---|
+| `multi.ativo` | `false` (padrão) / `true` |
+| `multi.fundo` | `"desfoque"` ou `"solido"` (usa `grafico.cor_solida`) |
+| `multi.min_rosto` | 0,06: rostos menores (fundo, plateia) são ignorados |
+| `multi.histerese_entrada` / `_saida` | 3 / 4 amostras seguidas para trocar de modo |
+
+O pedido chamava as chaves de `layout.multi.*`; como `layout` é uma string
+(`full`/`split`), a seção é `multi`. A legenda desce se o quadro inteiro a
+alcançaria. Depuração: `<clip>_multi.json` ao lado do .mp4. Bancada:
+`python -m tools.multi_local --fonte arquivo.mp4`.
+
 ## Biblioteca de transições
 
 Tudo gerado por filtros nativos do ffmpeg (nada externo) e **desligado por
