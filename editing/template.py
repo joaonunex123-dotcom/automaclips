@@ -111,6 +111,17 @@ PADRAO = {
         "pad": {"ativo": False, "arquivo": "pad_{categoria}.wav",
                 "volume": 1.0},
         "teto_sfx_abaixo_da_voz_db": 8.0,
+        # Master: limiter depois da mixagem (teto em dBFS).
+        "limiter": {"ativo": False, "teto_db": -1.5},
+        # SFX sintetizados que acompanham os efeitos visuais, no mesmo quadro.
+        "sfx_visuais": {
+            "ativo": False, "volume": 0.8,
+            "categorias": {"whoosh": True, "shutter": True, "pop": True,
+                           "impacto": True, "riser": True},
+            "mapa": {"shutter": "shutter", "iris": "riser",
+                     "whip_pan": "whoosh", "glitch": "pop",
+                     "flash": "impacto", "zoom": "impacto"},
+        },
     },
 }
 
@@ -339,7 +350,8 @@ def _numero(secao, nome, chave, minimo=None, maximo=None, exclusivo=False):
 
 def _validar_efeitos(ef):
     for nome in ("zoom", "flash", "vinheta", "barra", "voz", "ducking", "pad",
-                 "shutter", "iris", "whip_pan", "glitch", "cadencia"):
+                 "shutter", "iris", "whip_pan", "glitch", "cadencia",
+                 "limiter", "sfx_visuais"):
         secao = ef.get(nome)
         if not isinstance(secao, dict):
             raise TemplateInvalido(f"efeitos.{nome} precisa ser um objeto")
@@ -377,6 +389,23 @@ def _validar_efeitos(ef):
         _numero(ef[nome], nome, "duracao_s", minimo=0.15, maximo=0.4)
     _numero(ef["cadencia"], "cadencia", "espacamento_minimo_s", minimo=0.5)
     _numero(ef["cadencia"], "cadencia", "maximo_por_clip", minimo=0)
+
+    _numero(ef["limiter"], "limiter", "teto_db", minimo=-12.0, maximo=0.0)
+    sv = ef["sfx_visuais"]
+    _numero(sv, "sfx_visuais", "volume", minimo=0.0, maximo=2.0)
+    from editing import gerar_sfx
+    if not isinstance(sv.get("categorias"), dict) or not all(
+            k in gerar_sfx.SONS_VISUAIS and isinstance(v, bool)
+            for k, v in sv["categorias"].items()):
+        raise TemplateInvalido(
+            "efeitos.sfx_visuais.categorias precisa mapear "
+            f"{gerar_sfx.SONS_VISUAIS} para true/false")
+    if not isinstance(sv.get("mapa"), dict) or not all(
+            k in ("shutter", "iris", "whip_pan", "glitch", "flash", "zoom")
+            and v in gerar_sfx.SONS_VISUAIS for k, v in sv["mapa"].items()):
+        raise TemplateInvalido(
+            "efeitos.sfx_visuais.mapa precisa ligar efeito -> um de "
+            f"{gerar_sfx.SONS_VISUAIS}")
 
     _numero(ef["voz"], "voz", "lufs", minimo=-40.0, maximo=-5.0)
     duck = ef["ducking"]

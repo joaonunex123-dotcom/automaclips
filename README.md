@@ -417,6 +417,32 @@ levou o render de um clip de 30 s de 10 s para 46 s — o glitch usa
 `chromashift`; e um `geq` por pixel em 1080x1920 custava +9 s — a íris é uma
 máscara em baixa resolução ampliada com bicúbico.
 
+## SFX dos efeitos visuais e mixagem
+
+`efeitos.sfx_visuais` (desligado) faz cada efeito visual disparar um som
+**sintetizado por numpy** (`editing/gerar_sfx.py`; nenhum arquivo de terceiros):
+
+| som | acompanha | forma |
+| --- | --- | --- |
+| `whoosh` | `whip_pan` | ruído filtrado com varredura de 400 Hz a 3,5 kHz |
+| `shutter` | `shutter` | dois cliques de obturador + tum de 180 Hz |
+| `pop` | `glitch` | bolha: seno de 700 a 180 Hz |
+| `impacto` | `flash`, `zoom` | queda de 120 a 38 Hz com cauda |
+| `riser` | `iris` | subida de 0,8 s, ataque no fim |
+
+`efeitos.sfx_visuais.categorias` liga/desliga cada som e `mapa` troca o
+efeito -> som. Os arquivos são gerados na primeira vez em `sfx.diretorio`.
+
+**Sincronia:** cada som tem uma âncora (o instante em que ele "bate", medido
+no sinal) e o arquivo começa em `momento_chave_do_efeito - ancora`; se isso
+cairia antes do clip, o início do arquivo é cortado em vez de atrasado.
+Verificado num render real: o clique aparece no áudio a 3,0 s ± 1,5 quadro.
+
+**Mixagem** (`efeitos.voz`, `ducking`, `limiter` — todos desligados):
+voz normalizada a -16 LUFS (loudnorm em duas passadas), cada SFX limitado a
+no máximo `teto_sfx_abaixo_da_voz_db` (8 dB) abaixo da voz, ducking por
+sidechain quando há fala e `alimiter` no master (`limiter.teto_db`, -1,5).
+
 ## Efeitos sonoros
 
 Desligados por padrão: dependem de arquivos de áudio que não vêm no

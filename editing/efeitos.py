@@ -33,7 +33,7 @@ MODOS_ZOOM = ("picos", "intervalo")
 TRANSICOES_NOVAS = ("shutter", "iris", "whip_pan", "glitch")
 TRANSICOES = TRANSICOES_NOVAS + ("flash", "zoom")
 EFEITOS_VISUAIS = ("zoom", "flash", "vinheta", "barra") + TRANSICOES_NOVAS
-EFEITOS_AUDIO = ("voz", "ducking", "pad")
+EFEITOS_AUDIO = ("voz", "ducking", "pad", "limiter", "sfx_visuais")
 
 # Em que ponto da duração do efeito cai o "momento-chave" (o que o som segue):
 # o clarão tem o pico no começo; os demais, no meio (fechado, borrão máximo).
@@ -174,6 +174,62 @@ def planejar_transicoes(config, duracao_s, picos=None, segmentos_grafico=None):
         usos[tipo] += 1
         anterior = tipo
     return eventos
+
+
+# --- SFX dos efeitos visuais ---------------------------------------------------
+
+_ANCORAS = {}
+
+
+def ancora_do_som(nome):
+    """Segundo, dentro do arquivo, em que o som `nome` "bate" (cache)."""
+    if nome not in _ANCORAS:
+        from editing import gerar_sfx
+        _ANCORAS[nome] = gerar_sfx.ancora_do_arquivo(nome)
+    return _ANCORAS[nome]
+
+
+def diretorio_sfx(config, base_dir=None):
+    raiz = config["sfx"].get("diretorio") or ""
+    if not os.path.isabs(raiz):
+        raiz = os.path.join(base_dir or _RAIZ, raiz)
+    return raiz
+
+
+def plano_sfx_visuais(config, eventos, duracao_s, base_dir=None):
+    """Sons que acompanham os efeitos visuais, alinhados ao quadro.
+
+    Cada evento dispara o som mapeado em `sfx_visuais.mapa[tipo]`, se a
+    categoria dele estiver ligada. O som é posto de modo que o instante em
+    que ele "bate" (a âncora) caia no momento-chave do efeito: o arquivo
+    começa em `chave_s - ancora`. Se isso cairia antes do clip, o início do
+    arquivo é cortado (`corte_ini_s`) em vez de atrasar — a sincronia nunca
+    cede. Sons são sintetizados na hora se o arquivo ainda não existir.
+    """
+    cfg = config["efeitos"]["sfx_visuais"]
+    if not cfg.get("ativo") or not eventos:
+        return []
+    from editing import gerar_sfx
+
+    sons = []
+    pasta = diretorio_sfx(config, base_dir)
+    for e in eventos:
+        nome = cfg["mapa"].get(e["tipo"])
+        if not nome or not cfg["categorias"].get(nome):
+            continue
+        ancora = ancora_do_som(nome)
+        inicio = float(e["chave_s"]) - ancora
+        if inicio + 0.05 >= duracao_s:
+            continue
+        sons.append({
+            "tipo": "sfx_visual", "evento": e["tipo"], "som": nome,
+            "caminho": gerar_sfx.gerar_um(nome, pasta),
+            "instante_s": max(0.0, round(inicio, 4)),
+            "corte_ini_s": max(0.0, round(-inicio, 4)),
+            "chave_s": float(e["chave_s"]),
+            "volume": float(cfg["volume"]),
+        })
+    return sons
 
 
 def instantes_do_tipo(eventos, tipo):
@@ -579,14 +635,28 @@ def cadeia_audio(config, sons, duracao_s, medir=None, voz_medida=None):
         else:
             vol = volume_com_teto(som["volume"], medir(som["caminho"]),
                                   voz_lufs, abaixo)
+            corte = float(som.get("corte_ini_s") or 0.0)
+            aparar = (f"atrim=start={corte:.4f},asetpts=PTS-STARTPTS,"
+                      if corte > 0 else "")
             partes.append(
-                f"[{i + 1}:a]aresample={taxa},adelay={atraso}:all=1,"
+                f"[{i + 1}:a]aresample={taxa},{aparar}adelay={atraso}:all=1,"
                 f"volume={vol:.4f}{rotulo}"
             )
         bus.append(rotulo)
 
+    rotulo_final = "[aout]"
+    if _ativo(config, "limiter"):
+        rotulo_final = "[mst]"
+
+    def _limiter():
+        teto = 10 ** (float(ef["limiter"]["teto_db"]) / 20.0)
+        return (f"[mst]alimiter=limit={teto:.4f}:attack=5:release=60:"
+                "level=disabled[aout]")
+
     if not bus:
-        partes.append("[voz0]anull[aout]")
+        partes.append(f"[voz0]anull{rotulo_final}")
+        if rotulo_final != "[aout]":
+            partes.append(_limiter())
         return ";".join(partes)
 
     if _ativo(config, "ducking"):
@@ -613,6 +683,8 @@ def cadeia_audio(config, sons, duracao_s, medir=None, voz_medida=None):
     n = 2 if fonte else 1 + len(bus)
     partes.append(
         f"{entradas}amix=inputs={n}:duration=first:"
-        "dropout_transition=0:normalize=0[aout]"
+        f"dropout_transition=0:normalize=0{rotulo_final}"
     )
+    if rotulo_final != "[aout]":
+        partes.append(_limiter())
     return ";".join(partes)

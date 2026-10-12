@@ -21,7 +21,6 @@ from scipy import signal
 TAXA = 48000
 ALVO_LUFS = -24.0
 PICO_MAX_DBFS = -1.0
-NOMES = ("whoosh", "ding", "pop")
 
 # Camas ambiente por categoria (efeitos.pad). Loop de 24 s sem emenda: toda
 # frequência é múltipla de 1/24 Hz, então termina exatamente na fase em que
@@ -97,6 +96,95 @@ def pop():
     return _fade(x, 0.0005, 0.01)
 
 
+def shutter():
+    """Clique de obturador: fecha (seco) e reabre (mais fraco), com tum grave.
+
+    Dois transientes de ruído passa-banda 1,5-6 kHz a 55 ms um do outro e uma
+    ressonância curta em 180 Hz — o "tchk-tk" de uma câmera mecânica.
+    """
+    rng = np.random.default_rng(7)
+    dur = 0.16
+    n = int(TAXA * dur)
+    t = np.arange(n) / TAXA
+    sos = signal.butter(3, [1500, 6000], btype="band", fs=TAXA, output="sos")
+
+    def estalo(inicio_s, ganho, tau):
+        x = np.zeros(n)
+        i0 = int(TAXA * inicio_s)
+        seg = signal.sosfilt(sos, rng.standard_normal(n - i0))
+        x[i0:] = seg * np.exp(-np.arange(n - i0) / TAXA / tau)
+        return ganho * x
+
+    x = estalo(0.0, 1.0, 0.006) + estalo(0.055, 0.55, 0.008)
+    x += 0.5 * np.sin(2 * np.pi * 180 * t) * np.exp(-t * 90)
+    return _fade(x, 0.0003, 0.02)
+
+
+def impacto():
+    """Impacto grave: queda de 120 a 38 Hz com cauda e um estalo de ataque."""
+    rng = np.random.default_rng(11)
+    dur = 0.6
+    t = np.arange(int(TAXA * dur)) / TAXA
+    freq = 38 + 82 * np.exp(-t * 14)
+    fase = 2 * np.pi * np.cumsum(freq) / TAXA
+    corpo = np.sin(fase) * np.exp(-t * 7.5)
+    sos = signal.butter(2, 400, btype="low", fs=TAXA, output="sos")
+    sopro = signal.sosfilt(sos, rng.standard_normal(len(t))) * np.exp(-t * 40)
+    return _fade(corpo + 0.8 * sopro, 0.0005, 0.05)
+
+
+def riser():
+    """Subida de 0,8 s: ruído filtrado que abre de 300 Hz a 5 kHz + tom que sobe.
+
+    O instante de ataque é o FIM do som: a intenção é que ele "chegue" no
+    efeito visual, então a âncora fica em `RISER_S` e o render atrasa menos.
+    """
+    rng = np.random.default_rng(13)
+    dur = 0.8
+    n = int(TAXA * dur)
+    t = np.arange(n) / TAXA
+    ruido = rng.standard_normal(n)
+    saida = np.zeros(n)
+    bloco = 512
+    centros = np.geomspace(300, 5000, n // bloco + 1)
+    zi = None
+    for i, c in enumerate(centros):
+        ini, fim = i * bloco, min((i + 1) * bloco, n)
+        if ini >= fim:
+            break
+        sos = signal.butter(2, [c * 0.7, c * 1.3], btype="band", fs=TAXA,
+                            output="sos")
+        if zi is None:
+            zi = np.zeros((sos.shape[0], 2))
+        saida[ini:fim], zi = signal.sosfilt(sos, ruido[ini:fim], zi=zi)
+    env = (t / dur) ** 2
+    freq = 200 * (1200 / 200) ** (t / dur)
+    tom = np.sin(2 * np.pi * np.cumsum(freq) / TAXA)
+    x = env * (saida / max(np.std(saida), 1e-9) * 0.6 + 0.35 * tom)
+    return _fade(x, 0.01, 0.004)
+
+
+def ancora_do_sinal(x, janela_s=0.01):
+    """Instante (s) do pico da envoltória RMS: onde o som "bate".
+
+    É o que o render alinha ao momento-chave do efeito visual. Para clique,
+    pop e impacto é ~0; para o riser, o fim; para o whoosh, o meio.
+    """
+    j = max(1, int(TAXA * janela_s))
+    n = len(x) // j
+    if n == 0:
+        return 0.0
+    rms = np.sqrt(np.mean(np.reshape(x[:n * j], (n, j)) ** 2, axis=1))
+    return float((np.argmax(rms) + 0.5) * j / TAXA)
+
+
+SONS = {"whoosh": whoosh, "ding": ding, "pop": pop, "shutter": shutter,
+        "impacto": impacto, "riser": riser}
+NOMES = tuple(SONS)
+# Os que o render usa para os efeitos visuais (editing/efeitos.py).
+SONS_VISUAIS = ("whoosh", "shutter", "pop", "impacto", "riser")
+
+
 def pad(notas, lfos, semente=0):
     """Acorde de senos com tremolo lento, periódico em PAD_DURACAO_S."""
     t = _t(PAD_DURACAO_S)
@@ -154,10 +242,24 @@ def gerar_pads(diretorio):
     return relatorio
 
 
+def gerar_um(nome, diretorio):
+    """Escreve só `nome`.wav (se ainda não existir). Devolve o caminho."""
+    os.makedirs(diretorio, exist_ok=True)
+    caminho = os.path.join(diretorio, f"{nome}.wav")
+    if not os.path.exists(caminho):
+        sf.write(caminho, normalizar(SONS[nome]()), TAXA, subtype="PCM_16")
+    return caminho
+
+
+def ancora_do_arquivo(nome):
+    """Âncora (s) do som `nome`, medida no sinal normalizado."""
+    return ancora_do_sinal(normalizar(SONS[nome]()))
+
+
 def gerar(diretorio):
     os.makedirs(diretorio, exist_ok=True)
     relatorio = []
-    for nome, fn in zip(NOMES, (whoosh, ding, pop)):
+    for nome, fn in SONS.items():
         y = normalizar(fn())
         caminho = os.path.join(diretorio, f"{nome}.wav")
         sf.write(caminho, y, TAXA, subtype="PCM_16")

@@ -123,8 +123,12 @@ def renderizar_clip(conn, linha, config, biblioteca=None, carregar_transcricao=N
     if segmentos:
         extras_efeitos["grafico"] = segmentos
     if efeitos_mod.cadencia_governa(config):
-        extras_efeitos["transicoes"] = efeitos_mod.planejar_transicoes(
+        plano_visual = efeitos_mod.planejar_transicoes(
             config, duracao, picos=picos, segmentos_grafico=segmentos)
+        extras_efeitos["transicoes"] = plano_visual
+        # O som segue o efeito: mesmo plano, mesmo quadro.
+        sons = list(sons) + efeitos_mod.plano_sfx_visuais(
+            config, plano_visual, duracao)
     if extras_efeitos:
         extras["efeitos"] = extras_efeitos
 
