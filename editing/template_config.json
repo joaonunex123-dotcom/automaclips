@@ -13,7 +13,7 @@
     "numérico do ASS: 1-3 embaixo, 4-6 no meio, 7-9 em cima."
   ],
 
-  "versao": "8",
+  "versao": "9",
 
   "saida": {
     "largura": 1080,
@@ -125,15 +125,15 @@
       "(com margem) não cabe na janela 9:16, o trecho aparece com o quadro",
       "INTEIRO, igual ao modo gráfico (usa grafico.transicao_s,",
       "grafico.desfoque_sigma e grafico.cor_solida). Se cabe, o crop normal",
-      "centra na caixa, nunca no vão entre as pessoas. Desligado por padrão;",
+      "centra na caixa, nunca no vão entre as pessoas. Ligado por padrão (fundo sólido);",
       "precisa de opencv-python-headless. Prioridade: gráfico > multi > single.",
       "  fundo   'desfoque' = cópia desfocada da cena; 'solido'",
       "  min_rosto   altura mínima do rosto (fração do quadro); menor = fundo",
       "  histerese_entrada / histerese_saida   amostras seguidas para trocar",
       "                      de single para multi / de volta (anti-pisca)"
     ],
-    "ativo": false,
-    "fundo": "desfoque",
+    "ativo": true,
+    "fundo": "solido",
     "min_rosto": 0.06,
     "histerese_entrada": 3,
     "histerese_saida": 4,

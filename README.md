@@ -412,8 +412,8 @@ crop centra na caixa, nunca no vão. Prioridade: gráfico > multi > single.
 
 | chave | efeito |
 |---|---|
-| `multi.ativo` | `false` (padrão) / `true` |
-| `multi.fundo` | `"desfoque"` ou `"solido"` (usa `grafico.cor_solida`) |
+| `multi.ativo` | `true` no template (`false` desliga) |
+| `multi.fundo` | `"solido"` (padrão, usa `grafico.cor_solida`) ou `"desfoque"` |
 | `multi.min_rosto` | 0,06: rostos menores (fundo, plateia) são ignorados |
 | `multi.histerese_entrada` / `_saida` | 3 / 4 amostras seguidas para trocar de modo |
 

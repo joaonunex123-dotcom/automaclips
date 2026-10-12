@@ -219,9 +219,9 @@ def test_trilha_do_single_segue_o_centro_e_ignora_o_multi(cfg):
 
 # --- template --------------------------------------------------------------------
 
-def test_template_traz_multi_desligado(template):
+def test_template_traz_multi_ligado_com_fundo_solido(template):
     m = template["multi"]
-    assert m["ativo"] is False and m["fundo"] == "desfoque"
+    assert m["ativo"] is True and m["fundo"] == "solido"
     assert (m["min_rosto"], m["histerese_entrada"], m["histerese_saida"]) \
         == (0.06, 3, 4)
 
@@ -314,7 +314,9 @@ def fonte_16x9(monkeypatch):
 
 def test_desligado_nao_chama_o_detector(conn, template, clip, tmp_path):
     chamadas = []
-    r = _renderizar_clip(conn, clip, template, tmp_path,
+    desligado = copy.deepcopy(template)
+    desligado["multi"]["ativo"] = False
+    r = _renderizar_clip(conn, clip, desligado, tmp_path,
                          detectar_multi=lambda *a: chamadas.append(a))
     assert chamadas == [] and "efeitos" not in r
 
