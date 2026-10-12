@@ -443,6 +443,22 @@ voz normalizada a -16 LUFS (loudnorm em duas passadas), cada SFX limitado a
 no máximo `teto_sfx_abaixo_da_voz_db` (8 dB) abaixo da voz, ducking por
 sidechain quando há fala e `alimiter` no master (`limiter.teto_db`, -1,5).
 
+## Bancada local de qualidade
+
+```bash
+python -m tools.qualidade_local --fonte ARQUIVO.mp4 --inicio 75 --duracao 30 \
+    --saida teste_local/qualidade --repeticoes 2
+```
+
+Gera `01_base.mp4` .. `06_efeitos_visuais_sonoros.mp4`, um frame de cada em
+`frames/`, `comparativo.mp4` (grade lado a lado) e `relatorio.json` com
+resolução, duração, LUFS (ebur128), tempo de render e os efeitos ligados. Cada
+vídeo passa pelo caminho real (`editar.renderizar_clip`, com banco temporário).
+Como a fonte local não tem gráfico, o script insere um gráfico sintético de
+1920x1080 no meio do trecho. Não chama LLM, transcrição nem publica; a legenda é
+um texto fixo. Roda também o teste da limpeza num diretório temporário, com
+ffmpeg real. `teste_local/` é ignorado pelo git.
+
 ## Efeitos sonoros
 
 Desligados por padrão: dependem de arquivos de áudio que não vêm no

@@ -75,9 +75,17 @@ def caminho_seguro(caminho, raiz, extensoes=None):
         return False, f"não resolvi o caminho: {e}"
     if not _dentro(real, raiz_real) or real == raiz_real:
         return False, f"fora do diretório permitido ({raiz_real})"
-    # Um componente do caminho que seja link e leve para fora já foi pego pelo
-    # realpath; este confere que o caminho dado é o real (sem desvios).
-    if os.path.abspath(caminho) != real:
+    # Nenhum componente ABAIXO da raiz pode ser link. A própria raiz pode viver
+    # sob um link do SO (/var -> /private/var no macOS), por isso a conta é
+    # feita contra a raiz, não contra o caminho absoluto inteiro.
+    absoluto = os.path.abspath(caminho)
+    for base in (os.path.abspath(raiz), raiz_real):
+        if _dentro(absoluto, base):
+            rel = os.path.relpath(absoluto, base)
+            if real != os.path.join(raiz_real, rel):
+                return False, "caminho passa por link simbólico"
+            break
+    else:
         return False, "caminho passa por link simbólico"
     if not os.path.isfile(real):
         return False, "não é arquivo comum"

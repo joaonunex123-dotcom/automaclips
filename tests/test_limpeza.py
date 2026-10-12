@@ -311,3 +311,14 @@ def test_fonte_apagada_conta_como_nao_baixada(conn, video):
     conn.execute("UPDATE midia SET fonte_apagada_em = datetime('now') "
                  "WHERE fila_clip_id = ?", (fila,))
     assert processar._precisa_baixar(conn, linha) is True
+
+
+def test_raiz_sob_link_do_so_nao_e_confundida_com_link_no_arquivo(tmp_path):
+    # /var -> /private/var no macOS: a raiz vive sob um link, o arquivo não.
+    real = tmp_path / "real"
+    (real / "d").mkdir(parents=True)
+    (tmp_path / "atalho").symlink_to(real)
+    f = real / "d" / "a.mp4"
+    f.write_text("x")
+    assert limpeza.caminho_seguro(str(tmp_path / "atalho" / "d" / "a.mp4"),
+                                  str(tmp_path / "atalho" / "d"))[0]
