@@ -241,6 +241,19 @@ INTERVALO_SOURCING_MIN = _int("INTERVALO_SOURCING_MIN", 360)
 INTERVALO_PIPELINE_MIN = _int("INTERVALO_PIPELINE_MIN", 60)
 INTERVALO_EDITING_MIN = _int("INTERVALO_EDITING_MIN", 60)
 INTERVALO_PUBLISH_MIN = _int("INTERVALO_PUBLISH_MIN", 15)
+# Fila de clips prontos (orchestrator/fila.py). Quando os clips renderizados e
+# ainda não publicados caem abaixo deste número, o laço seleciona o próximo
+# vídeo, processa e gera novos clips; acima dele, não gasta download, API nem
+# CPU à toa. 0 desliga (volta ao comportamento de processar tudo sempre).
+FILA_MINIMA_CLIPS = _int("FILA_MINIMA_CLIPS", 8)
+# Vídeos NOVOS iniciados por ciclo quando a fila está baixa.
+FILA_VIDEOS_POR_CICLO = _int("FILA_VIDEOS_POR_CICLO", 1)
+# Status legível por máquina (último ciclo, fila, quota, espaço, token).
+STATUS_PATH = _caminho(
+    "CLIPS_STATUS_PATH", os.path.join(_BASE_DIR, "ops", "status.json"))
+# Trava de processo único. Por perfil: canais diferentes rodam em paralelo.
+TRAVA_PATH = _caminho("CLIPS_TRAVA_PATH", _dado("orquestrador.lock"))
+
 # Analytics roda uma vez por dia (etapa 7). Hora local, formato HH:MM.
 HORARIO_ANALYTICS = _caminho("HORARIO_ANALYTICS", "05:00")
 
@@ -653,7 +666,7 @@ PLATAFORMAS = _lista("PLATAFORMAS", _PLATAFORMAS_PADRAO)
 # Publicações por dia, por plataforma. O número é o RITMO (quantos horários de
 # queda o scheduler pode usar num dia), não o freio: o backstop é o
 # MAX_POSTS_DIA_ABSOLUTO lá em cima.
-POSTS_POR_DIA = _int("POSTS_POR_DIA", 3)
+POSTS_POR_DIA = _int("POSTS_POR_DIA", 5)
 # Override por plataforma: 'tiktok=4,instagram=2'. Existe porque as três
 # plataformas não têm o mesmo apetite — o YouTube tem quota dura por dia, o
 # TikTok limita publicações por token, e o Instagram, chamadas por hora.
@@ -669,7 +682,15 @@ def posts_por_dia(plataforma):
 # melhores, e só cai aqui enquanto não houver histórico. Estes três são
 # palpite de horário de pico de consumo — substitua pelos seus assim que a
 # etapa 7 tiver dado.
-HORARIOS_PADRAO = _lista("HORARIOS_PADRAO", ["12:00", "18:00", "21:00"])
+# Cinco horários espaçados entre 08:00 e 21:00 (a cada 3h15), fuso de
+# FUSO_AGENDAMENTO. Mais espaçado que INTERVALO_MINIMO_MIN (120 min).
+HORARIOS_PADRAO = _lista(
+    "HORARIOS_PADRAO", ["08:00", "11:15", "14:30", "17:45", "21:00"])
+
+# Fuso em que HORARIOS_PADRAO é lido. O agendamento usa o relógio LOCAL da
+# máquina; este nome serve para conferir se o SO está nele (o mini PC precisa
+# estar em America/Sao_Paulo) e para o status.json. Ver scheduler.fuso_confere.
+FUSO_AGENDAMENTO = _caminho("FUSO_AGENDAMENTO", "America/Sao_Paulo")
 
 # Distância mínima entre duas publicações na MESMA plataforma. Dois clips
 # seguidos competem entre si pela mesma audiência no feed.
@@ -686,6 +707,20 @@ AGENDAMENTO_MAX_DIAS = _int("AGENDAMENTO_MAX_DIAS", 7)
 # diário de 10.000. Na prática, seis uploads por dia.
 YOUTUBE_QUOTA_DIARIA = _int("YOUTUBE_QUOTA_DIARIA", 10000)
 YOUTUBE_CUSTO_UPLOAD = _int("YOUTUBE_CUSTO_UPLOAD", 1600)
+
+# Folga que o upload NÃO consome: o mesmo projeto do Google Cloud atende o
+# sourcing (listar vídeos) e as capas (thumbnails.set, 50 por clip). Com 10.000
+# de teto, 1.600 por upload e margem 500, o 6º upload do dia é recusado — cinco
+# uploads são 8.000, e sobram 2.000 para o resto.
+YOUTUBE_QUOTA_MARGEM = _int("YOUTUBE_QUOTA_MARGEM", 500)
+
+# Data (AAAA-MM-DD) em que o token OAuth do YouTube deixa de valer. O Google
+# dá refresh token de 7 dias a app em modo "Testing" da tela de consentimento;
+# o projeto não tem como ler isso do token, então quem sabe a data a informa
+# aqui e o status.json passa a contar os dias. Vazio = desconhecido.
+YOUTUBE_TOKEN_VENCE_EM = _caminho("YOUTUBE_TOKEN_VENCE_EM", "")
+# Dias de antecedência para o status.json marcar alerta.
+TOKEN_ALERTA_DIAS = _int("TOKEN_ALERTA_DIAS", 14)
 
 # A quota do YouTube zera à meia-noite do PACÍFICO, não do fuso local. Usar a
 # data daqui faria o contador virar em outro momento que o teto de verdade —

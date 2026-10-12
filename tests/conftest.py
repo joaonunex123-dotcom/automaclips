@@ -46,6 +46,19 @@ def sem_parada_global(monkeypatch, tmp_path):
                         str(tmp_path / "sem_parada_na_raiz"))
 
 
+@pytest.fixture(autouse=True)
+def status_e_trava_em_tmp(monkeypatch, tmp_path):
+    """O ops/status.json e a trava do orquestrador nunca saem do tmp_path.
+
+    Sem isto, qualquer teste que rode um ciclo escreveria no ops/ do
+    repositório e disputaria a trava com um orquestrador de verdade.
+    """
+    monkeypatch.setattr(settings, "STATUS_PATH",
+                        str(tmp_path / "ops" / "status.json"))
+    monkeypatch.setattr(settings, "TRAVA_PATH",
+                        str(tmp_path / "orquestrador.lock"))
+
+
 @pytest.fixture
 def conn(tmp_path, monkeypatch):
     """Conexão a um clips.db descartável, com o schema já aplicado."""

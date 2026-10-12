@@ -76,3 +76,10 @@ clips.db*
 # Provedor de PO token (bgutil): node + servidor + venv do yt-dlp novo. Reconstruível (README).
 .pot/
 .venv313/
+
+# Estado de execução do orquestrador (ops/status.json) e a trava de processo
+# único. São da máquina, não do projeto.
+ops/status.json
+ops/status.json.tmp
+orquestrador.lock
+*.lock

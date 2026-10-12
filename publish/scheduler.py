@@ -193,3 +193,24 @@ def agenda_do_dia(conn, plataforma, agora=None):
         1 for texto in repositorio.horarios_agendados(conn, plataforma)
         if str(texto).startswith(hoje)
     )
+
+
+def fuso_confere(agora=None, nome=None):
+    """(ok, deslocamento_local_h, deslocamento_configurado_h).
+
+    O agendamento lê HORARIOS_PADRAO no relógio LOCAL da máquina. Se o SO
+    estiver em outro fuso que FUSO_AGENDAMENTO, "08:00" não é 08:00 em
+    São Paulo. Isto só CONFERE (e o status.json/log avisam); não converte.
+    """
+    from datetime import timezone
+    nome = nome or settings.FUSO_AGENDAMENTO
+    agora = agora or datetime.now(timezone.utc)
+    try:
+        from zoneinfo import ZoneInfo
+        configurado = agora.astimezone(ZoneInfo(nome)).utcoffset()
+    except Exception:
+        return True, None, None          # sem base de fusos: não alarma
+    local = agora.astimezone().utcoffset()
+    return (local == configurado,
+            local.total_seconds() / 3600.0,
+            configurado.total_seconds() / 3600.0)

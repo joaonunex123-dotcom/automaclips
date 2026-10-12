@@ -56,10 +56,14 @@ def _precisa_baixar(conn, linha):
                 and not midia["fonte_apagada_em"])
 
 
-def fila_pendente(conn, limite=None, retentar=False):
-    """Vídeos a processar, do melhor score para o pior."""
-    estados = list(ESTADOS_PENDENTES)
-    if retentar:
+def fila_pendente(conn, limite=None, retentar=False, estados=None):
+    """Vídeos a processar, do melhor score para o pior.
+
+    `estados` restringe a consulta (o orquestrador separa "em andamento" de
+    "novo"); sem ele valem todos os pendentes.
+    """
+    estados = list(estados if estados is not None else ESTADOS_PENDENTES)
+    if retentar and repositorio.STATUS_FALHA not in estados:
         estados.append(repositorio.STATUS_FALHA)
     marcadores = ", ".join("?" * len(estados))
     sql = (
@@ -256,10 +260,12 @@ def processar_video(conn, linha, baixar=None, transcrever=None, detectar=None,
     return _analisar(conn, linha, midia, transcricao, detectar, picos_do_audio)
 
 
-def processar_fila(conn, limite=None, retentar=False, **injecoes):
+def processar_fila(conn, limite=None, retentar=False, estados=None,
+                   **injecoes):
     """Processa a fila inteira. Devolve {status_final: quantidade}."""
     limite = settings.PIPELINE_MAX_VIDEOS if limite is None else limite
-    pendentes = fila_pendente(conn, limite=limite, retentar=retentar)
+    pendentes = fila_pendente(conn, limite=limite, retentar=retentar,
+                              estados=estados)
     log.info("%d vídeos pendentes.", len(pendentes))
 
     contagem = {}

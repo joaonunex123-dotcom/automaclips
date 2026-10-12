@@ -1,0 +1,14 @@
+# EXEMPLO — ver automaclips-ciclo.service.
+
+[Unit]
+Description=automaclips — dispara um ciclo por hora
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+# Recupera disparo perdido (máquina desligada) uma vez, ao ligar.
+Persistent=true
+Unit=automaclips-ciclo.service
+
+[Install]
+WantedBy=timers.target

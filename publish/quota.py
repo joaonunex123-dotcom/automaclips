@@ -62,16 +62,31 @@ def restante(conn, servico=SERVICO_YOUTUBE, limite=None, dia=None, agora=None):
 
 
 def cabe(conn, custo=None, servico=SERVICO_YOUTUBE, limite=None, dia=None,
-         agora=None):
-    """Se a próxima chamada cabe no que sobrou do dia."""
+         agora=None, margem=0):
+    """Se a próxima chamada cabe no que sobrou do dia, deixando `margem`.
+
+    A margem é a folga que o upload não pode consumir (sourcing, capas): o
+    teto é do PROJETO, e os 10.000 não são só dos uploads.
+    """
     custo = settings.YOUTUBE_CUSTO_UPLOAD if custo is None else custo
-    return restante(conn, servico, limite, dia, agora) >= custo
+    return restante(conn, servico, limite, dia, agora) >= custo + margem
 
 
 def registrar(conn, custo=None, servico=SERVICO_YOUTUBE, dia=None, agora=None):
     """Soma o consumo. Chamado DEPOIS da chamada que gastou."""
     custo = settings.YOUTUBE_CUSTO_UPLOAD if custo is None else custo
     repositorio.registrar_quota(conn, servico, dia or dia_de_quota(agora), custo)
+
+
+def uploads_restantes(conn, servico=SERVICO_YOUTUBE, limite=None, agora=None,
+                      margem=None):
+    """Quantos uploads ainda cabem hoje, respeitando a margem."""
+    margem = settings.YOUTUBE_QUOTA_MARGEM if margem is None else margem
+    custo = settings.YOUTUBE_CUSTO_UPLOAD
+    if not custo:
+        return 0
+    livre = restante(conn, servico, limite, None, agora) - margem
+    return max(0, livre // custo)
 
 
 def resumo(conn, servico=SERVICO_YOUTUBE, limite=None, agora=None):

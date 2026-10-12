@@ -593,6 +593,30 @@ simples de começar, mas se o processo morrer ninguém o levanta — e num
 pipeline que publica em horário marcado isso é perder a janela sem aviso.
 `--uma-vez` também não precisa do APScheduler instalado.
 
+### 24/7 no mini PC: fila, cadência e status
+
+* **5 posts por dia** (`POSTS_POR_DIA=5`), em `HORARIOS_PADRAO` =
+  08:00, 11:15, 14:30, 17:45, 21:00 (a cada 3h15, acima do `INTERVALO_MINIMO_MIN`
+  de 120 min). O horário é lido no **relógio local**: o SO do mini PC precisa
+  estar em `America/Sao_Paulo` (`FUSO_AGENDAMENTO`); o log e o `status.json`
+  avisam se não estiver. O sexto clip do dia vai para o dia seguinte.
+* **Quota do YouTube:** 5 uploads = 5 x 1.600 = **8.000** de 10.000. A
+  `YOUTUBE_QUOTA_MARGEM` (500) mantém o sexto upload recusado, e sobram **2.000
+  unidades** (1.750 com `YOUTUBE_ENVIAR_CAPA`, 50 por capa) para o sourcing e o
+  resto do projeto. O contador é o do banco (`quota_api`, dia do Pacífico).
+* **Aquecimento:** inalterado — `AQUECIMENTO_POSTS_DIA` (padrão 1; use 2 para
+  1-2 posts) por `AQUECIMENTO_DIAS` (3) contados do primeiro post real. Os
+  clips agendados além do teto ficam `agendado` e saem nos dias seguintes.
+* **Fila de clips prontos:** com menos de `FILA_MINIMA_CLIPS` (8) clips
+  renderizados e ainda não publicados, o laço inicia `FILA_VIDEOS_POR_CICLO`
+  (1) vídeo novo, do maior score; acima disso só termina o que já começou. `0`
+  desliga e volta a processar tudo. `ORCAMENTO_USD` atingido para o pipeline.
+* **Instância única + reinício seguro:** trava `orquestrador.lock` (flock) e
+  nenhum estado em memória — vídeo `baixado`/`transcrito` é retomado.
+* **`ops/status.json`:** última execução, fila, quota, espaço livre, vencimento
+  do token (`YOUTUBE_TOKEN_VENCE_EM`) e `alertas`. Exemplos de systemd e launchd
+  em [ops/](ops/README.md).
+
 ## Vários canais
 
 Um **perfil** é um canal de destino: fontes próprias, banco próprio, mídia

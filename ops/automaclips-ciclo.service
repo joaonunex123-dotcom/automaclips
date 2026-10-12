@@ -1,0 +1,23 @@
+# EXEMPLO — alternativa ao modo laço: UM ciclo e sai, disparado por um timer.
+#
+# Atenção: `--uma-vez` roda TODAS as etapas em cada disparo (sem os intervalos
+# por etapa do modo laço). Por isso o timer abaixo é de hora em hora, não de
+# 15 em 15 minutos: o sourcing gastaria quota da API à toa.
+#
+#   cp ops/automaclips-ciclo.service ops/automaclips-ciclo.timer /etc/systemd/system/
+#   systemctl daemon-reload
+#   systemctl enable --now automaclips-ciclo.timer
+#   systemctl list-timers | grep automaclips
+
+[Unit]
+Description=automaclips — um ciclo do orquestrador
+
+[Service]
+Type=oneshot
+User=automaclips
+WorkingDirectory=/opt/automaclips
+Environment=TZ=America/Sao_Paulo
+ExecStart=/opt/automaclips/.venv313/bin/python -m orchestrator.main_loop --uma-vez
+Nice=10
+# Um ciclo com render pode passar de uma hora; a trava impede sobreposição.
+TimeoutStartSec=3h

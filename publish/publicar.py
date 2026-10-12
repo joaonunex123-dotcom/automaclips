@@ -167,9 +167,10 @@ def agendar_pendentes(conn, plataformas=None, limite=None, agora=None,
 # --- publicação ---------------------------------------------------------------
 
 def _enviar_youtube(conn, linha, agora=None):
-    if not quota.cabe(conn, agora=agora):
+    if not quota.cabe(conn, agora=agora, margem=settings.YOUTUBE_QUOTA_MARGEM):
         raise SemQuota(
-            f"upload custa {settings.YOUTUBE_CUSTO_UPLOAD} e sobrou "
+            f"upload custa {settings.YOUTUBE_CUSTO_UPLOAD} (+ margem "
+            f"{settings.YOUTUBE_QUOTA_MARGEM}) e sobrou "
             f"{quota.restante(conn, agora=agora)} — {quota.resumo(conn, agora=agora)}"
         )
     cliente = youtube_mod.construir_cliente()
