@@ -158,7 +158,12 @@ CREATE TABLE IF NOT EXISTS midia (
     -- o ffmpeg vai cortar.
     duracao_real_s   REAL NOT NULL DEFAULT 0,
     baixado_em       TEXT,
-    transcrito_em    TEXT
+    transcrito_em    TEXT,
+    -- Limpeza do vídeo-fonte (pipeline/limpeza.py): quando o fonte e os
+    -- intermediários foram apagados, e quantos bytes isso liberou. NULL = ainda
+    -- em disco.
+    fonte_apagada_em      TEXT,
+    fonte_bytes_liberados INTEGER NOT NULL DEFAULT 0
 );
 
 -- Um trecho candidato a virar clip vertical. Sai do highlight_detect (Claude

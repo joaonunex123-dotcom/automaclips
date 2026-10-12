@@ -542,6 +542,32 @@ duração degrada para views/hora por faixa — pior, porque mede alcance e não
 quanto o clip segurou, mas continua sendo medição e não palpite.
 `ANALYTICS_RETENCAO=1` liga, depois de autorizar o escopo extra.
 
+## Limpeza do vídeo-fonte e espaço em disco
+
+Um podcast baixado pesa gigabytes; os clips dele, dezenas de megabytes. Num
+mini PC 24/7 o disco acaba antes da fila. `pipeline/limpeza.py` apaga o
+vídeo-fonte e os intermediários (áudio, fatias de áudio, temporários do
+yt-dlp, `.ass`) **depois** que todos os clips daquele vídeo estão renderizados e
+validados.
+
+```bash
+python -m pipeline.limpeza --simular   # lista o que seria apagado; não toca em nada
+python -m pipeline.limpeza             # apaga (exige LIMPAR_FONTE_APOS_CLIPS=true)
+```
+
+| variável (.env) | padrão | efeito |
+| --- | --- | --- |
+| `LIMPAR_FONTE_APOS_CLIPS` | `false` | liga a limpeza real; o laço principal a roda após cada etapa de edição |
+| `LIMPEZA_ESPACO_MIN_GB` | `10` | abaixo disso o pipeline pausa os downloads **novos** e registra no log (0 desliga) |
+
+Trava de segurança, por arquivo: precisa ser arquivo comum, **não** link
+simbólico, e o `realpath` precisa estar dentro de `CLIPS_DOWNLOADS_DIR` (ou, para
+os `.ass`, do diretório de render). Fora disso é recusado e logado. Nunca
+apaga: clips renderizados, capas, `clips.db`, transcrições (o metadado que o
+agendamento usa) nem arquivo que o banco aponte como render. O resultado fica em
+`midia.fonte_apagada_em` e `midia.fonte_bytes_liberados`. Uma fonte apagada
+conta como não baixada: reprocessar o vídeo baixa de novo.
+
 ## Rodando sozinho
 
 ```bash

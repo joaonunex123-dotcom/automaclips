@@ -62,7 +62,30 @@ def etapa_pipeline(conn):
 
 
 def etapa_editing(conn):
-    return editar.renderizar_fila(conn)
+    resultado = editar.renderizar_fila(conn)
+    _limpar_fontes(conn)
+    return resultado
+
+
+def _limpar_fontes(conn):
+    """Apaga o vídeo-fonte dos podcasts prontos. Só com a flag ligada.
+
+    Nunca derruba a etapa de edição: falha de limpeza é aviso, e o render já
+    aconteceu.
+    """
+    if not settings.LIMPAR_FONTE_APOS_CLIPS:
+        return {}
+    try:
+        from pipeline import limpeza
+        resultado = limpeza.limpar(conn, simular=False)
+    except Exception as e:
+        log.warning("Limpeza do vídeo-fonte falhou: %s", e)
+        return {}
+    liberado = sum(r["bytes"] for r in resultado.values())
+    if liberado:
+        log.info("Limpeza: %.1f MB liberados em %d vídeo(s).",
+                 liberado / 1e6, len(resultado))
+    return resultado
 
 
 def etapa_publish(conn):

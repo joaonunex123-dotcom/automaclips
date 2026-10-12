@@ -80,6 +80,9 @@ COLUNAS_ACRESCENTADAS = (
     # Capa gerada por editing/capa.py (vertical; a horizontal fica na mesma
     # pasta). Vazio para o que foi renderizado antes da coluna existir.
     ("renders", "capa_path", "TEXT NOT NULL DEFAULT ''"),
+    # Limpeza do vídeo-fonte depois dos clips prontos (pipeline/limpeza.py).
+    ("midia", "fonte_apagada_em", "TEXT"),
+    ("midia", "fonte_bytes_liberados", "INTEGER NOT NULL DEFAULT 0"),
 )
 
 

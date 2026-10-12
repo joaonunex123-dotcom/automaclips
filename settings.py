@@ -352,6 +352,17 @@ TRANSCRICOES_DIR = _caminho(
     "CLIPS_TRANSCRICOES_DIR", os.path.join(DOWNLOADS_DIR, "transcricoes")
 )
 
+# --- pipeline: limpeza do vídeo-fonte ----------------------------------------
+#
+# Depois que TODOS os clips de um vídeo estão renderizados e validados, apaga o
+# vídeo-fonte baixado e os intermediários dele (pipeline/limpeza.py). DESLIGADO:
+# apagar é irreversível, então quem liga é o dono do canal. `--simular` lista
+# sem apagar, com a flag ligada ou não.
+LIMPAR_FONTE_APOS_CLIPS = _bool("LIMPAR_FONTE_APOS_CLIPS", False)
+# Abaixo deste espaço livre (GB) no disco dos downloads, o pipeline pausa os
+# downloads NOVOS e registra no log. 0 desliga a guarda.
+LIMPEZA_ESPACO_MIN_GB = _float("LIMPEZA_ESPACO_MIN_GB", 10.0)
+
 # --- pipeline: download -------------------------------------------------------
 
 # Seletor de formato do yt-dlp. Teto de 1080p: o clip final é vertical e
