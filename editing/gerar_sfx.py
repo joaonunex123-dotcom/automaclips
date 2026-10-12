@@ -34,6 +34,10 @@ PADS = {
     "satisfatorio": ((174.6, 220.0, 261.6, 329.6), (1, 3)),
     "parkour": ((110.0, 164.8, 220.0, 329.6), (3, 4)),
     "asmr_geometrico": ((146.8, 220.0, 293.7, 370.0), (1, 2)),
+    # Categorias de filler baixado para teste (assets/filler/MANIFESTO.json).
+    "subway": ((123.5, 185.0, 246.9, 311.1), (2, 4)),
+    "culinaria": ((130.8, 164.8, 196.0, 261.6), (1, 2)),
+    "satisfatorio_outros": ((146.8, 185.0, 220.0, 277.2), (1, 3)),
 }
 
 

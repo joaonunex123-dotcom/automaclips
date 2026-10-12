@@ -66,3 +66,25 @@ python tools/gerar_filler.py slime --teste   # 4 s, para conferir rápido
 Cada pasta recebe `filler.mp4` (60 s, 30 fps, 1080x768, sem áudio) e um
 `LICENCA.txt`. Os arquivos continuam ignorados pelo git: versiona-se o gerador,
 e qualquer máquina reproduz o mesmo vídeo com a mesma semente.
+
+## Manifesto e validação (MANIFESTO.json)
+
+`assets/filler/MANIFESTO.json` (versionado; os vídeos não) registra, por
+arquivo: `arquivo` (relativo, `categoria/nome.mp4`), `categoria`, `url`,
+`canal`, `titulo`, `licenca` (`cc` ou `padrao`), `data_download`, `resolucao`,
+`duracao_s`, `hash_sha256` e `status` (`teste`).
+
+Com o manifesto presente, o layout só sorteia arquivo que tenha entrada com
+URL e categoria (a da pasta); o resto é recusado com aviso no log. Licença
+`padrao` (direitos reservados) passa com aviso de risco, e
+`FILLER_PERMITIR_LICENCA_PADRAO=false` a recusa. Sem manifesto, tudo se
+comporta como antes. Cada pasta tem um `LICENCA.txt`: material baixado para
+teste interno, a substituir por gravação própria ou licenciada antes de uso
+em escala.
+
+## Rotação
+
+O trecho é sorteado com semente (`variantes.semente` + clip) e não pode tocar
+os dois últimos trechos do mesmo canal (histórico em
+`assets/filler/.rotacao.json`, ignorado pelo git). Refazer o render de um clip
+reaproveita o trecho dele.
