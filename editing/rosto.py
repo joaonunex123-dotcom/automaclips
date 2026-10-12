@@ -345,7 +345,10 @@ def classificar(amostras, dimensoes, proporcao, margem=_MARGEM_ROSTO):
         x1 = min(1.0, max(c[2] for c in caixas) + margem * larg_media)
         y0 = min(c[1] for c in caixas)
         y1 = max(c[3] for c in caixas)
-        modo = "single" if (x1 - x0) <= janela + 1e-9 else "multi"
+        # Um rosto só nunca vira "multi": um close-up largo não cabe com a
+        # margem, mas não há outra pessoa para cortar.
+        modo = ("single" if len(caixas) == 1 or (x1 - x0) <= janela + 1e-9
+                else "multi")
         saida.append({"t": t, "modo": modo, "centro": (x0 + x1) / 2.0,
                       "n": len(caixas), "caixa": (x0, y0, x1, y1)})
     return saida

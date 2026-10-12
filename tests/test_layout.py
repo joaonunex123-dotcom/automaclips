@@ -599,3 +599,40 @@ def test_render_full_sintetico_nao_regride(tmp_path, template):
         "full_teste", destino_dir=str(tmp_path / "out"), caminho_ffmpeg=FFMPEG,
     )
     assert "1080x1920" in _info(saida)
+
+
+# --- rotação por canal e manifesto (filler_manifesto) --------------------------
+
+def test_clips_consecutivos_do_canal_nao_repetem_trecho(ab):
+    # Dois arquivos de 70 s, clip de 30 s: sempre existe trecho livre.
+    anterior = None
+    for clip_id in range(30):
+        plano = layout.planejar_filler(
+            ab, "split:parkour", 30.0, clip_id=clip_id, canal="c1",
+            executar=_executar_duracao(70.0))
+        fim = plano["inicio_s"] + 30.0
+        if anterior and anterior["caminho"] == plano["caminho"]:
+            assert fim <= anterior["inicio_s"] or plano["inicio_s"] >= anterior["fim"]
+        anterior = {"caminho": plano["caminho"], "inicio_s": plano["inicio_s"],
+                    "fim": fim}
+
+
+def test_refazer_o_clip_reaproveita_o_trecho_gravado(ab):
+    um = layout.planejar_filler(ab, "split:parkour", 30.0, clip_id=5, canal="c",
+                                executar=_executar_duracao(300.0))
+    layout.planejar_filler(ab, "split:parkour", 30.0, clip_id=6, canal="c",
+                           executar=_executar_duracao(300.0))
+    dois = layout.planejar_filler(ab, "split:parkour", 30.0, clip_id=5, canal="c",
+                                  executar=_executar_duracao(300.0))
+    assert um == dois
+
+
+def test_manifesto_filtra_a_listagem(ab):
+    import json
+    raiz = ab["split"]["diretorio"]
+    with open(os.path.join(raiz, "MANIFESTO.json"), "w") as f:
+        json.dump({"arquivos": [{"arquivo": "parkour/a.mp4",
+                                 "categoria": "parkour", "url": "https://x",
+                                 "licenca": "cc"}]}, f)
+    nomes = [os.path.basename(c) for c in layout.listar_fillers(ab, "parkour")]
+    assert nomes == ["a.mp4"]            # b.mov não tem entrada

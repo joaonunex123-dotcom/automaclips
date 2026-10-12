@@ -49,6 +49,12 @@ def test_um_rosto_sempre_cabe_e_centra_nele():
     assert c["centro"] == pytest.approx(0.8, abs=1e-6)
 
 
+def test_um_rosto_enorme_nunca_vira_multi():
+    # close-up: 0.28 de largura + margem passaria da janela (0.316)
+    c = rosto.classificar(_amostras([_rosto(0.5, largura=0.28)]), DIM, PROP)[0]
+    assert c["modo"] == "single" and c["n"] == 1
+
+
 def test_duas_pessoas_proximas_cabem_e_centram_na_caixa_nao_no_vao():
     # janela 9:16 de 1920x1080 = 607.5 px = 0.316 da largura
     c = rosto.classificar(_amostras([_rosto(0.40), _rosto(0.50)]), DIM, PROP)[0]

@@ -24,6 +24,8 @@ import re
 import shutil
 import subprocess
 
+from editing import filler_manifesto
+
 log = logging.getLogger(__name__)
 
 FULL = "full"
@@ -76,14 +78,19 @@ def diretorio_filler(config, base_dir=None):
 
 def listar_fillers(config, categoria, base_dir=None):
     """Arquivos de vídeo de assets/filler/<categoria>/, em ordem estável."""
-    pasta = os.path.join(diretorio_filler(config, base_dir), categoria)
+    raiz = diretorio_filler(config, base_dir)
+    pasta = os.path.join(raiz, categoria)
     if not categoria or not os.path.isdir(pasta):
         return []
-    return sorted(
+    arquivos = sorted(
         os.path.join(pasta, nome) for nome in os.listdir(pasta)
         if nome.lower().endswith(EXTENSOES_FILLER)
         and os.path.isfile(os.path.join(pasta, nome))
     )
+    # Com MANIFESTO.json na raiz, só entra o que o validador aceita.
+    import settings
+    return filler_manifesto.filtrar(
+        arquivos, raiz, settings.FILLER_PERMITIR_LICENCA_PADRAO)
 
 
 def variantes_disponiveis(config, base_dir=None):
@@ -186,12 +193,16 @@ def duracao_do_arquivo(caminho, ffmpeg="ffmpeg", executar=None):
 
 
 def planejar_filler(config, variante, duracao_clip_s, rng=None, clip_id=0,
-                    ffmpeg="ffmpeg", executar=None, base_dir=None):
+                    ffmpeg="ffmpeg", executar=None, base_dir=None, canal=None):
     """{'caminho', 'inicio_s', 'loop'} do preenchimento deste clip.
 
     Arquivo e trecho são aleatórios, mas o gerador padrão é semeado pelo
     clip_id: refazer o render do mesmo clip reproduz o mesmo preenchimento.
     Arquivo mais curto que o clip: começa do zero e entra em loop.
+
+    Rotação: o trecho não pode tocar os últimos usados no mesmo canal
+    (filler_manifesto.EVITAR_ULTIMOS). Um clip que já tem trecho gravado no
+    histórico o reaproveita (o render repetido não "gasta" outro trecho).
     """
     _, categoria = separar(variante)
     arquivos = listar_fillers(config, categoria, base_dir)
@@ -199,12 +210,26 @@ def planejar_filler(config, variante, duracao_clip_s, rng=None, clip_id=0,
         raise ErroLayout(f"sem preenchimento para a variante {variante!r}")
     rng = rng or random.Random(f"{config['variantes'].get('semente', '')}:{clip_id}")
 
-    caminho = rng.choice(arquivos)
-    duracao = duracao_do_arquivo(caminho, ffmpeg, executar)
-    if duracao <= duracao_clip_s:
-        return {"caminho": caminho, "inicio_s": 0.0, "loop": True}
-    inicio = rng.uniform(0.0, duracao - duracao_clip_s)
-    return {"caminho": caminho, "inicio_s": round(inicio, 3), "loop": False}
+    raiz = diretorio_filler(config, base_dir)
+    if canal is None:
+        import settings
+        canal = settings.PERFIL or "padrao"
+    historico = filler_manifesto.ler_historico(raiz, canal)
+    for item in historico:
+        if item.get("clip_id") == clip_id and item.get("caminho") in arquivos:
+            return {"caminho": item["caminho"], "inicio_s": item["inicio_s"],
+                    "loop": item["loop"]}
+
+    candidatos = [(c, duracao_do_arquivo(c, ffmpeg, executar)) for c in arquivos]
+    anteriores = [i for i in historico if i.get("clip_id") != clip_id]
+    plano = filler_manifesto.sortear_trecho(
+        rng, candidatos, duracao_clip_s, anteriores)
+    if plano["repetido"]:
+        log.warning("Filler: pouco material em %r; trecho repetido no canal %s.",
+                    categoria, canal)
+    filler_manifesto.registrar(raiz, canal, clip_id, plano)
+    return {"caminho": plano["caminho"], "inicio_s": plano["inicio_s"],
+            "loop": plano["loop"]}
 
 
 def filler_do_layout(config, variante, duracao_clip_s, planejar=None, **kwargs):
