@@ -299,6 +299,19 @@ Todo parâmetro visual mora em
 tamanho, cor, posição, reframe, zoom, watermark, codec. Nada disso existe no
 código: ajustar o visual é editar o JSON e renderizar de novo.
 
+### Reframe que segue o rosto
+
+`reframe.rosto.ativo` (desligado por padrão, só no modo `corte`) troca a âncora
+fixa por uma trilha que acompanha o maior rosto do trecho
+([`editing/rosto.py`](editing/rosto.py)). Amostra o vídeo a 2 fps com o
+classificador frontal do OpenCV (`opencv-python-headless<5`; a série 5 removeu o
+`CascadeClassifier`), e filtra o movimento: zona morta, mediana móvel, rampas
+suaves e no máximo `max_movimentos` por clip. Sem rosto confiável (menos de
+`minimo_deteccoes` das amostras) ou sem OpenCV, o clip sai com
+`ancora_horizontal`, como antes. Detector Haar acha rosto de frente, bem
+iluminado; ele **não foi validado contra gravação de rosto real** — ligue e
+assista antes de deixar ligado.
+
 Legenda, hook e watermark saem de um **único arquivo .ass**, não de filtros
 `drawtext`. Fazê-los com drawtext exigiria um filtro por palavra (centenas por
 clip) mais um caminho de fonte absoluto que muda por sistema operacional. Como

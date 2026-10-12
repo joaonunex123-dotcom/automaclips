@@ -13,7 +13,7 @@
     "numérico do ASS: 1-3 embaixo, 4-6 no meio, 7-9 em cima."
   ],
 
-  "versao": "6",
+  "versao": "7",
 
   "saida": {
     "largura": 1080,
@@ -31,7 +31,23 @@
     "modo": "corte",
     "_ancora": "0 = alinha à esquerda, 0.5 = centro, 1 = direita",
     "ancora_horizontal": 0.5,
-    "desfoque_sigma": 30
+    "desfoque_sigma": 30,
+    "rosto": {
+      "_comentario": [
+        "Segue o rosto do locutor em vez de cortar sempre no ponto fixo.",
+        "DESLIGADO por padrão: precisa de opencv-python-headless e foi",
+        "verificado com detector simulado, não com gravação de rosto real.",
+        "Só vale com modo 'corte'. Sem rosto confiável, usa ancora_horizontal."
+      ],
+      "ativo": false,
+      "amostras_por_s": 2,
+      "_zona_morta": "fração do espaço livre; o enquadramento só se move quando o rosto passa disso",
+      "zona_morta": 0.12,
+      "transicao_s": 0.6,
+      "max_movimentos": 6,
+      "_minimo_deteccoes": "fração das amostras com rosto; abaixo disso, vale a âncora fixa",
+      "minimo_deteccoes": 0.3
+    }
   },
 
   "layout": "full",

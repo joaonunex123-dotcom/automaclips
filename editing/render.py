@@ -68,6 +68,12 @@ def filtro_reframe(config, altura=None, entrada="[0:v]", saida="[vr]"):
         )
 
     ancora = reframe["ancora_horizontal"]
+    trilha = reframe.get("trilha")
+    if trilha:
+        # Reframe que segue o rosto (editing.rosto): a âncora vira função de t.
+        from editing import rosto
+        ancora = "(" + rosto.expressao_ancora(
+            trilha, reframe["rosto"]["transicao_s"]) + ")"
     # Recorte que preenche: pega a maior janela 9:16 que cabe no original,
     # limitando pelos DOIS lados. Limitar só pela altura distorceria um vídeo
     # que já viesse mais alto que 9:16 (um Short republicado, por exemplo).
