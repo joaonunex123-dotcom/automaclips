@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jarvis</title>
+<style>
+  :root { --fundo: #0d0f12; --texto: #e6e9ef; --suave: #7d8594; --destaque: #5fd3a6; --erro: #ff6b6b; }
+  @media (prefers-color-scheme: light) {
+    :root { --fundo: #f4f5f7; --texto: #15181d; --suave: #5b6372; --destaque: #0f8a5f; --erro: #c53030; }
+  }
+  html, body { margin: 0; height: 100%; background: var(--fundo); color: var(--texto);
+    font-family: system-ui, sans-serif; }
+  body { width: 800px; height: 480px; overflow: hidden; box-sizing: border-box; padding: 16px; }
+  h1 { font-size: 18px; margin: 0 0 8px; color: var(--suave); font-weight: 600; }
+  #mascote { font-size: 56px; font-weight: 700; color: var(--destaque); margin: 24px 0 8px; }
+  #mascote.erro { color: var(--erro); }
+  #tarefa { font-size: 18px; color: var(--suave); min-height: 24px; }
+  #sensores { position: absolute; right: 16px; top: 16px; text-align: right; font-size: 16px; color: var(--suave); }
+  #proximas { position: absolute; left: 16px; bottom: 16px; right: 16px; font-size: 16px; }
+  #proximas div { margin: 4px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #login { position: absolute; left: 16px; top: 200px; }
+  #login input { font-size: 16px; padding: 6px; width: 420px; }
+  #login button { font-size: 16px; padding: 6px 12px; }
+</style>
+</head>
+<body>
+  <h1>JARVIS</h1>
+  <div id="sensores"></div>
+  <div id="mascote">descansando</div>
+  <div id="tarefa"></div>
+  <div id="proximas"></div>
+  <div id="login" hidden>
+    <input id="token" type="password" placeholder="X-Jarvis-Token">
+    <button id="entrar">entrar</button>
+  </div>
+<script>
+  // Tela de placeholder: mostra o estado do serviço e se atualiza pelo /events.
+  // O layout final e o chat vêm depois (ver docs/pendencias.md).
+  const $ = (id) => document.getElementById(id);
+  let token = null;
+  try { token = localStorage.getItem("jarvis_token"); } catch (e) { /* navegador sem storage */ }
+
+  async function atualizarStatus() {
+    const r = await fetch("/status", { headers: { "X-Jarvis-Token": token } });
+    if (r.status === 401) { pedirToken(); return; }
+    const s = await r.json();
+    $("mascote").textContent = s.mascote;
+    $("mascote").className = s.mascote === "erro" ? "erro" : "";
+    $("tarefa").textContent = s.tarefa_atual || "";
+    const temp = s.temperatura_c === null ? "--" : s.temperatura_c.toFixed(1) + " °C";
+    $("sensores").textContent = `${temp} · CPU ${s.cpu_percent.toFixed(0)}% · RAM ${s.ram.percent.toFixed(0)}%`;
+    $("proximas").innerHTML = "";
+    for (const item of s.proximas) {
+      const linha = document.createElement("div");
+      linha.textContent = `${item.quando.slice(11, 16)}  ${item.titulo}`;
+      $("proximas").appendChild(linha);
+    }
+  }
+
+  function pedirToken() { $("login").hidden = false; }
+
+  function conectar() {
+    // EventSource não envia cabeçalho, então o token vai na query string.
+    const es = new EventSource(`/events?token=${encodeURIComponent(token)}`);
+    es.addEventListener("status", atualizarStatus);
+    es.addEventListener("lembrete_disparado", atualizarStatus);
+    es.addEventListener("nota_criada", atualizarStatus);
+    es.onerror = () => { es.close(); setTimeout(conectar, 3000); };
+  }
+
+  $("entrar").onclick = () => {
+    token = $("token").value.trim();
+    try { localStorage.setItem("jarvis_token", token); } catch (e) { /* sem storage */ }
+    $("login").hidden = true;
+    iniciar();
+  };
+
+  function iniciar() {
+    atualizarStatus();
+    conectar();
+  }
+
+  if (token) iniciar(); else pedirToken();
+</script>
+</body>
+</html>

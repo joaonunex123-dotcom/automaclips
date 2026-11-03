@@ -1,0 +1,23 @@
+[Unit]
+Description=Jarvis (backend FastAPI + SQLite)
+Documentation=file:///home/orangepi/automaclips/jarvis/deploy/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Troque se o usuário ou o caminho do clone forem outros (ver deploy/README.md).
+User=orangepi
+WorkingDirectory=/home/orangepi/automaclips/jarvis
+EnvironmentFile=/home/orangepi/automaclips/jarvis/.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/orangepi/automaclips/jarvis/.venv/bin/python -m backend --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=5
+
+# Endurecimento leve: o serviço não ganha privilégio novo nem escreve fora do próprio diretório.
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
