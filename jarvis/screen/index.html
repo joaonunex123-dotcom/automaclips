@@ -2,86 +2,117 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=800, initial-scale=1">
+<meta name="color-scheme" content="dark">
 <title>Jarvis</title>
-<style>
-  :root { --fundo: #0d0f12; --texto: #e6e9ef; --suave: #7d8594; --destaque: #5fd3a6; --erro: #ff6b6b; }
-  @media (prefers-color-scheme: light) {
-    :root { --fundo: #f4f5f7; --texto: #15181d; --suave: #5b6372; --destaque: #0f8a5f; --erro: #c53030; }
-  }
-  html, body { margin: 0; height: 100%; background: var(--fundo); color: var(--texto);
-    font-family: system-ui, sans-serif; }
-  body { width: 800px; height: 480px; overflow: hidden; box-sizing: border-box; padding: 16px; }
-  h1 { font-size: 18px; margin: 0 0 8px; color: var(--suave); font-weight: 600; }
-  #mascote { font-size: 56px; font-weight: 700; color: var(--destaque); margin: 24px 0 8px; }
-  #mascote.erro { color: var(--erro); }
-  #tarefa { font-size: 18px; color: var(--suave); min-height: 24px; }
-  #sensores { position: absolute; right: 16px; top: 16px; text-align: right; font-size: 16px; color: var(--suave); }
-  #proximas { position: absolute; left: 16px; bottom: 16px; right: 16px; font-size: 16px; }
-  #proximas div { margin: 4px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #login { position: absolute; left: 16px; top: 200px; }
-  #login input { font-size: 16px; padding: 6px; width: 420px; }
-  #login button { font-size: 16px; padding: 6px 12px; }
-</style>
+<link rel="stylesheet" href="estilo.css">
 </head>
 <body>
-  <h1>JARVIS</h1>
-  <div id="sensores"></div>
-  <div id="mascote">descansando</div>
-  <div id="tarefa"></div>
-  <div id="proximas"></div>
-  <div id="login" hidden>
-    <input id="token" type="password" placeholder="X-Jarvis-Token">
-    <button id="entrar">entrar</button>
+<div id="moldura">
+  <div id="tela" data-tela="inicio">
+
+    <header id="barra">
+      <span class="marca">JARVIS</span>
+      <span id="conexao" class="ponto" title="eventos ao vivo"></span>
+      <span class="metricas">
+        <span id="hora" class="hora">--:--</span>
+        <span class="m"><small>TEMP</small><b id="m-temp">--</b></span>
+        <span class="m"><small>CPU</small><b id="m-cpu">--</b></span>
+        <span class="m"><small>RAM</small><b id="m-ram">--</b></span>
+      </span>
+    </header>
+
+    <main class="telas">
+
+      <section class="tela-conteudo" data-id="inicio">
+        <div class="painel-mascote">
+          <div class="mascote" data-mascote></div>
+          <div id="rotulo" class="rotulo">descansando</div>
+          <div id="tarefa" class="suave"></div>
+        </div>
+        <div class="painel-inicio">
+          <div id="relogio" class="relogio">--:--</div>
+          <div id="data" class="suave"></div>
+          <div class="titulo-secao">Próximas</div>
+          <ul id="proximas" class="lista"></ul>
+        </div>
+      </section>
+
+      <section class="tela-conteudo" data-id="resposta">
+        <div class="cabecalho-resposta">
+          <div class="mascote mini" data-mascote></div>
+          <div id="pergunta-atual" class="pergunta"></div>
+        </div>
+        <div id="resposta" class="texto-resposta"></div>
+        <div id="metricas-resposta" class="metricas-resposta"></div>
+        <form id="entrada" class="entrada" hidden autocomplete="off">
+          <input id="campo" type="text" maxlength="4000" placeholder="Digite e pressione Enter">
+          <button class="botao" type="submit">Enviar</button>
+        </form>
+      </section>
+
+      <section class="tela-conteudo" data-id="agenda">
+        <h2>Agenda</h2>
+        <ul id="lista-agenda" class="lista"></ul>
+      </section>
+
+      <section class="tela-conteudo" data-id="notas">
+        <h2>Notas</h2>
+        <ul id="lista-notas" class="lista"></ul>
+      </section>
+
+      <section class="tela-conteudo" data-id="status">
+        <h2>Status</h2>
+        <div class="grade">
+          <div class="cartao">
+            <small>Temperatura</small>
+            <b id="s-temp">--</b>
+          </div>
+          <div class="cartao">
+            <small>CPU</small>
+            <b id="s-cpu">--</b>
+            <div class="barra"><i id="s-cpu-barra"></i></div>
+          </div>
+          <div class="cartao">
+            <small>RAM</small>
+            <b id="s-ram">--</b>
+            <span id="s-ram-detalhe" class="det"></span>
+            <div class="barra"><i id="s-ram-barra"></i></div>
+          </div>
+          <div class="cartao">
+            <small>Uptime</small>
+            <b id="s-uptime">--</b>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <div id="aviso" class="aviso" hidden></div>
+
+    <footer id="rodape">
+      <span>1 falar · 2 próxima · 3 voltar</span>
+      <span id="nome-tela"></span>
+    </footer>
+
+    <div id="login" hidden>
+      <form id="form-login">
+        <label for="token">Token do Jarvis</label>
+        <input id="token" type="password" autocomplete="off">
+        <button class="botao" type="submit">Entrar</button>
+      </form>
+    </div>
+
   </div>
-<script>
-  // Tela de placeholder: mostra o estado do serviço e se atualiza pelo /events.
-  // O layout final e o chat vêm depois (ver docs/pendencias.md).
-  const $ = (id) => document.getElementById(id);
-  let token = null;
-  try { token = localStorage.getItem("jarvis_token"); } catch (e) { /* navegador sem storage */ }
+</div>
 
-  async function atualizarStatus() {
-    const r = await fetch("/status", { headers: { "X-Jarvis-Token": token } });
-    if (r.status === 401) { pedirToken(); return; }
-    const s = await r.json();
-    $("mascote").textContent = s.mascote;
-    $("mascote").className = s.mascote === "erro" ? "erro" : "";
-    $("tarefa").textContent = s.tarefa_atual || "";
-    const temp = s.temperatura_c === null ? "--" : s.temperatura_c.toFixed(1) + " °C";
-    $("sensores").textContent = `${temp} · CPU ${s.cpu_percent.toFixed(0)}% · RAM ${s.ram.percent.toFixed(0)}%`;
-    $("proximas").innerHTML = "";
-    for (const item of s.proximas) {
-      const linha = document.createElement("div");
-      linha.textContent = `${item.quando.slice(11, 16)}  ${item.titulo}`;
-      $("proximas").appendChild(linha);
-    }
-  }
+<div id="controles" hidden>
+  <button type="button" data-tecla="1">1 · falar</button>
+  <button type="button" data-tecla="2">2 · próxima</button>
+  <button type="button" data-tecla="3">3 · voltar</button>
+</div>
 
-  function pedirToken() { $("login").hidden = false; }
-
-  function conectar() {
-    // EventSource não envia cabeçalho, então o token vai na query string.
-    const es = new EventSource(`/events?token=${encodeURIComponent(token)}`);
-    es.addEventListener("status", atualizarStatus);
-    es.addEventListener("lembrete_disparado", atualizarStatus);
-    es.addEventListener("nota_criada", atualizarStatus);
-    es.onerror = () => { es.close(); setTimeout(conectar, 3000); };
-  }
-
-  $("entrar").onclick = () => {
-    token = $("token").value.trim();
-    try { localStorage.setItem("jarvis_token", token); } catch (e) { /* sem storage */ }
-    $("login").hidden = true;
-    iniciar();
-  };
-
-  function iniciar() {
-    atualizarStatus();
-    conectar();
-  }
-
-  if (token) iniciar(); else pedirToken();
-</script>
+<script src="config.js"></script>
+<script src="app.js"></script>
 </body>
 </html>

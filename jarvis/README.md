@@ -99,3 +99,21 @@ texto, registrada em `backend/llm.py:criar_provedor`.
 
 `POST /input/key` chama `backend/entrada.py:registrar_tecla`. Quando o GPIO
 entrar, a leitura dos pinos chama essa mesma função. Nada mais muda.
+
+## Tela 800×480
+
+`screen/` é a tela do display de 5", servida em `/`. Sem build: HTML, CSS e JS.
+
+- Simulador no navegador: `http://localhost:8000/?sim=1` (moldura 800×480 e 3 botões).
+- Teclas: 1 falar (por enquanto abre o campo de texto), 2 próxima tela, 3
+  voltar/cancelar. O teclado manda `POST /input/key`, como o hardware.
+- Teste de ponta a ponta com Playwright, com o backend no ar (`JARVIS_LLM=mock`):
+
+  ```bash
+  JARVIS_TOKEN=<mesmo token do .env> node tests/e2e_tela.js
+  ```
+
+  Grava as capturas em `docs/screens/`.
+- No Pi, em modo quiosque: ver `deploy/README.md`, seção 8.
+
+Decisões em `docs/decisoes.md`, seção 19.

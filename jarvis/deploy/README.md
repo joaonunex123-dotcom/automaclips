@@ -106,6 +106,30 @@ Depois, no `.env` do Jarvis: `JARVIS_LLM=llamacpp` e `LLAMA_URL=http://127.0.0.1
 e `sudo systemctl restart jarvis`. Um serviço systemd próprio para o
 llama-server ainda não existe (ver `docs/pendencias.md`).
 
+## 8. Tela 800×480 (kiosk)
+
+O Pi abre a tela sozinho: `cage` (um compositor Wayland mínimo) roda
+`chromium --kiosk` em `http://localhost:8000/`. Depende do passo 5, com o
+`jarvis` no ar.
+
+```bash
+sudo apt install -y cage curl chromium          # no Ubuntu 22.04, chromium-browser é snap
+chmod +x /home/orangepi/automaclips/jarvis/deploy/kiosk.sh
+sudo cp /home/orangepi/automaclips/jarvis/deploy/jarvis-kiosk.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now jarvis-kiosk
+```
+
+- O usuário precisa de acesso à tela: `sudo usermod -aG video,input,render orangepi`,
+  depois reinicie.
+- Na primeira abertura a tela pede o token. Como o Pi não tem teclado, conecte um
+  teclado USB uma vez. O token fica salvo no perfil `~/.config/jarvis-kiosk`.
+- Outro navegador ou outra URL: `sudo systemctl edit jarvis-kiosk` e defina
+  `Environment=CHROMIUM=/caminho` ou `Environment=JARVIS_URL=...`.
+- Parar: `sudo systemctl stop jarvis-kiosk`. Logs: `journalctl -u jarvis-kiosk -f`.
+
+Ainda não rodou num Pi de verdade (ver `docs/pendencias.md`).
+
 ## Problemas comuns
 
 - **`erro de configuração: JARVIS_TOKEN ausente`**: o `.env` não tem o token,

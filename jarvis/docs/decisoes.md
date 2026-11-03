@@ -171,3 +171,37 @@ para a leitura da tela não travar a escrita do chat.
 Placeholder funcional em `screen/index.html`: mostra o mascote, a tarefa, os
 sensores e os próximos itens, atualizando pelo `/events`. Não há chat na tela
 ainda. O layout final de 800×480 é trabalho à parte.
+
+## 19. Tela 800×480
+
+- **Onde.** `screen/` é servida pelo próprio FastAPI em `/`. Um serviço, uma
+  origem: a tela não precisa de CORS.
+- **Sem framework e sem build.** `index.html`, `estilo.css`, `app.js` e
+  `config.js`, nada de CDN. Animações só com `transform` e `opacity`, para o
+  Chromium do Pi não sofrer.
+- **Configuração.** `config.js` traz a URL do backend (vazia = mesma origem), o
+  fuso da casa (igual ao `JARVIS_TZ`) e o token. Sem token no arquivo, a tela
+  pede e guarda no `localStorage`. `config.js` é servido sem autenticação pela
+  porta 8000, então o token real não deve ficar nele no git.
+- **Teclas.** O teclado (1, 2, 3, e Esc como 3) e os botões do simulador mandam
+  `POST /input/key`: `down` ao apertar, `up` ao soltar. A tela não reage ao
+  clique: reage ao evento `tecla` que volta pelo `/events`. É o caminho do GPIO,
+  então o comportamento é o mesmo. Consequência: sem SSE conectado, as teclas
+  não fazem nada.
+- **O que cada tecla faz.** 1 abre o campo de texto na tela Resposta (placeholder
+  do "segurar para falar"; o `up` ainda não faz nada). 2 vai para a próxima tela,
+  em ciclo. 3 cancela a resposta em andamento; se não há, fecha o campo; se não
+  há campo, volta à tela anterior.
+- **Campo aberto.** Com o campo focado, 1, 2 e 3 são letras. Esc continua sendo
+  a tecla 3.
+- **Cancelar.** A tela fecha o WebSocket. O backend ainda não tem mensagem
+  `cancelar`: ele só descarta a resposta parcial ao tentar enviar o próximo
+  token, então o mascote pode ficar em `falando` por um instante.
+- **Mascote só pelo SSE.** O estado vem do evento `status`. O poll de `/status`
+  (a cada 5 s) atualiza sensores e próximas, mas não mexe no mascote, para uma
+  troca de estado não voltar sozinha.
+- **Simulador e atalhos.** `?sim=1` põe a tela numa moldura 800×480 centralizada,
+  com 3 botões embaixo. `?tela=agenda` abre direto numa tela.
+- **Kiosk.** `deploy/kiosk.sh` roda `chromium --kiosk` dentro do `cage`, em
+  `http://localhost:8000/`, com perfil fixo em `~/.config/jarvis-kiosk`: o token
+  digitado uma vez continua salvo depois de reboot.

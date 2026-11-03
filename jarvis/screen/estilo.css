@@ -1,0 +1,342 @@
+/* Tela 800×480 do Jarvis. Tema escuro fixo, fontes grandes (leitura a ~40 cm).
+   Animações só com transform e opacity, para rodar leve no Chromium do Pi. */
+
+:root {
+  --fundo: #0b0e13;
+  --painel: #141922;
+  --linha: #242c38;
+  --texto: #f2f5f9;
+  --suave: #aab4c3;
+  --acento: #5fd3a6;
+  --erro: #ff6b6b;
+  --aviso: #ffc46b;
+  --mascote: #5fd3a6;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+html, body {
+  margin: 0;
+  background: var(--fundo);
+  color: var(--texto);
+  font-family: "DejaVu Sans", "Segoe UI", Roboto, system-ui, -apple-system, sans-serif;
+}
+
+/* Kiosk: exatamente 800×480, sem barra de rolagem. */
+body { width: 800px; height: 480px; overflow: hidden; }
+#moldura { width: 800px; height: 480px; position: relative; }
+#tela {
+  position: relative;
+  width: 800px;
+  height: 480px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--fundo);
+}
+
+/* Simulador (?sim=1): a tela numa moldura centralizada, com os 3 botões embaixo. */
+body.sim {
+  width: auto;
+  height: auto;
+  min-height: 100vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  padding: 32px 0;
+  background: #050608;
+}
+body.sim #moldura { width: auto; height: auto; padding: 18px; background: #000; border-radius: 32px; box-shadow: 0 0 0 2px #1d232d; }
+body.sim #tela { border-radius: 14px; }
+#controles { display: flex; gap: 16px; }
+#controles button {
+  height: 56px;
+  min-width: 190px;
+  padding: 0 18px;
+  font-family: inherit;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--texto);
+  background: var(--painel);
+  border: 1px solid var(--linha);
+  border-radius: 12px;
+  cursor: pointer;
+  touch-action: none;
+}
+#controles button:active { background: var(--acento); color: #06130e; }
+
+/* Barra superior fixa */
+#barra {
+  flex: none;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 16px;
+  background: var(--painel);
+  border-bottom: 1px solid var(--linha);
+}
+.marca { font-size: 22px; font-weight: 700; letter-spacing: .18em; color: var(--acento); }
+.ponto { width: 10px; height: 10px; border-radius: 50%; background: var(--erro); }
+.ponto.on { background: var(--acento); }
+.metricas {
+  margin-left: auto;
+  display: flex;
+  align-items: baseline;
+  gap: 20px;
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+}
+.metricas small { font-size: 15px; color: var(--suave); letter-spacing: .08em; margin-right: 6px; }
+.metricas b { font-weight: 600; }
+.hora { font-size: 24px; font-weight: 600; }
+
+/* Área das telas */
+.telas { flex: 1; position: relative; min-height: 0; }
+.tela-conteudo {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  padding: 14px 18px;
+  min-height: 0;
+}
+.tela-conteudo.ativa { display: flex; }
+.tela-conteudo[data-id="inicio"].ativa { flex-direction: row; gap: 24px; }
+
+h2 { margin: 0 0 10px; font-size: 28px; font-weight: 600; }
+.suave { color: var(--suave); }
+
+/* Mascote */
+.mascote { width: 220px; height: 220px; }
+.mascote.mini { width: 60px; height: 60px; flex: none; }
+.mascote svg { width: 100%; height: 100%; overflow: visible; display: block; }
+
+[data-estado="descansando"] { --mascote: #5b8fd6; }
+[data-estado="ouvindo"]     { --mascote: #5fd3a6; }
+[data-estado="pensando"]    { --mascote: #b08cff; }
+[data-estado="falando"]     { --mascote: #40c4ff; }
+[data-estado="erro"]        { --mascote: #ff6b6b; }
+
+.m-corpo { fill: var(--mascote); }
+.m-face { fill: #0b0e13; }
+.m-antena line { stroke: var(--suave); stroke-width: 4; stroke-linecap: round; }
+.m-antena circle { fill: var(--mascote); }
+.m-olho { fill: var(--texto); transform-box: fill-box; transform-origin: center; }
+.m-fechado { fill: none; stroke: var(--texto); stroke-width: 6; stroke-linecap: round; opacity: 0; }
+.m-boca { fill: var(--texto); transform-box: fill-box; transform-origin: center; }
+.m-boca-erro { fill: none; stroke: var(--texto); stroke-width: 6; stroke-linecap: round; stroke-linejoin: round; opacity: 0; }
+.m-onda { fill: none; stroke: var(--mascote); stroke-width: 3; opacity: 0; transform-box: fill-box; transform-origin: center; }
+.m-cabeca { transform-box: fill-box; transform-origin: center; }
+.m-pensando circle { fill: var(--texto); opacity: 0; }
+.m-zzz { fill: var(--suave); font-size: 26px; font-weight: 700; opacity: 0; transform-box: fill-box; transform-origin: center; }
+
+/* descansando: olhos fechados, respiração lenta, "z" subindo */
+[data-estado="descansando"] .m-cabeca { animation: respirar 4s ease-in-out infinite; }
+[data-estado="descansando"] .m-olho { opacity: 0; }
+[data-estado="descansando"] .m-fechado { opacity: 1; }
+[data-estado="descansando"] .m-boca { transform: scaleY(.35); }
+[data-estado="descansando"] .m-zzz { animation: zzz 3s ease-in-out infinite; }
+
+/* ouvindo: olhos abertos e atentos, anel pulsando, antena piscando */
+[data-estado="ouvindo"] .m-olho { transform: scale(1.12); }
+[data-estado="ouvindo"] .m-onda { animation: onda 1.4s ease-out infinite; }
+[data-estado="ouvindo"] .m-antena circle { animation: piscar 0.7s steps(2, start) infinite; }
+[data-estado="ouvindo"] .m-boca { transform: scale(.5, .6); }
+
+/* pensando: olha para cima, pontinhos subindo, cabeça balançando */
+[data-estado="pensando"] .m-olhos { transform: translate(6px, -6px); }
+[data-estado="pensando"] .m-cabeca { animation: balancar 2.4s ease-in-out infinite; }
+[data-estado="pensando"] .m-pensando { opacity: 1; }
+[data-estado="pensando"] .m-pensando circle { animation: pontos 1.2s ease-in-out infinite; }
+[data-estado="pensando"] .m-pensando circle:nth-child(2) { animation-delay: .2s; }
+[data-estado="pensando"] .m-pensando circle:nth-child(3) { animation-delay: .4s; }
+[data-estado="pensando"] .m-boca { transform: scaleX(.5); }
+
+/* falando: boca abrindo e fechando */
+[data-estado="falando"] .m-cabeca { animation: flutuar .9s ease-in-out infinite; }
+[data-estado="falando"] .m-boca { animation: falar .24s ease-in-out infinite alternate; }
+
+/* erro: cor de alerta, olhos achatados, boca em zigue-zague, tremor */
+[data-estado="erro"] .m-cabeca { animation: tremer 2.5s linear infinite; }
+[data-estado="erro"] .m-olho { transform: scaleY(.35); }
+[data-estado="erro"] .m-boca { opacity: 0; }
+[data-estado="erro"] .m-boca-erro { opacity: 1; }
+
+@keyframes respirar { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.025); } }
+@keyframes balancar { 0%, 100% { transform: rotate(-3deg); } 50% { transform: rotate(3deg); } }
+@keyframes flutuar { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+@keyframes onda { 0% { transform: scale(.85); opacity: .7; } 100% { transform: scale(1.2); opacity: 0; } }
+@keyframes piscar { 0%, 100% { opacity: 1; } 50% { opacity: .2; } }
+@keyframes pontos { 0%, 100% { opacity: .15; } 40% { opacity: 1; } }
+@keyframes falar { from { transform: scaleY(.3); } to { transform: scaleY(1.6); } }
+@keyframes zzz { 0% { opacity: 0; transform: translate(0, 8px); } 40% { opacity: 1; } 100% { opacity: 0; transform: translate(6px, -10px); } }
+@keyframes tremer {
+  0%, 100% { transform: translateX(0); }
+  4% { transform: translateX(-4px); }
+  8% { transform: translateX(4px); }
+  12% { transform: translateX(-4px); }
+  16%, 100% { transform: translateX(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mascote * { animation: none !important; }
+}
+
+/* Início */
+.painel-mascote {
+  flex: none;
+  width: 250px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.rotulo { font-size: 24px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--mascote); }
+#tarefa { font-size: 20px; min-height: 24px; max-width: 240px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.painel-inicio { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.painel-inicio .item { min-height: 0; padding: 6px 14px; gap: 12px; }
+.painel-inicio .item-hora { min-width: 0; font-size: 26px; white-space: nowrap; }
+.painel-inicio .item-hora small { display: inline; margin-left: 8px; }
+.relogio { font-size: 84px; font-weight: 300; line-height: 1; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+#data { font-size: 24px; }
+.titulo-secao { margin: 8px 0 6px; font-size: 20px; letter-spacing: .14em; text-transform: uppercase; color: var(--suave); }
+
+/* Listas e cartões compartilhados */
+.lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; overflow: hidden; }
+.item {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 58px;
+  padding: 8px 16px;
+  background: var(--painel);
+  border: 1px solid var(--linha);
+  border-radius: 12px;
+}
+.item-hora { flex: none; min-width: 112px; font-size: 28px; font-weight: 600; color: var(--acento); font-variant-numeric: tabular-nums; }
+.item-hora small { display: block; font-size: 18px; font-weight: 400; color: var(--suave); }
+.item-corpo { flex: 1; min-width: 0; }
+.item-titulo { font-size: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.item-sub { font-size: 20px; color: var(--suave); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vazio { font-size: 24px; color: var(--suave); padding: 10px 4px; }
+
+/* Resposta */
+.cabecalho-resposta { flex: none; display: flex; align-items: center; gap: 14px; min-height: 60px; }
+.pergunta { flex: 1; min-width: 0; font-size: 22px; color: var(--suave); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.texto-resposta {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 6px 2px;
+  font-size: 26px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.metricas-resposta { flex: none; min-height: 28px; font-size: 20px; color: var(--acento); font-variant-numeric: tabular-nums; }
+.metricas-resposta.erro { color: var(--erro); }
+.entrada { flex: none; display: flex; gap: 10px; margin-top: 6px; }
+.entrada input {
+  flex: 1;
+  min-width: 0;
+  height: 52px;
+  padding: 0 14px;
+  font-family: inherit;
+  font-size: 24px;
+  color: var(--texto);
+  background: var(--painel);
+  border: 2px solid var(--acento);
+  border-radius: 12px;
+  outline: none;
+}
+
+.botao {
+  flex: none;
+  height: 52px;
+  padding: 0 22px;
+  font-family: inherit;
+  font-size: 22px;
+  font-weight: 600;
+  color: #06130e;
+  background: var(--acento);
+  border: 0;
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+/* Status */
+.grade { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.cartao {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 2px;
+  padding: 16px 18px;
+  background: var(--painel);
+  border: 1px solid var(--linha);
+  border-radius: 14px;
+  min-width: 0;
+}
+.cartao small { font-size: 20px; letter-spacing: .08em; text-transform: uppercase; color: var(--suave); }
+.cartao b { font-size: 50px; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.det { font-size: 20px; color: var(--suave); }
+.barra { height: 10px; margin-top: 6px; background: var(--linha); border-radius: 5px; overflow: hidden; }
+.barra i { display: block; height: 100%; width: 0; background: var(--acento); border-radius: 5px; }
+
+/* Rodapé de teclas e avisos */
+#rodape {
+  flex: none;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  font-size: 20px;
+  color: var(--suave);
+  background: var(--painel);
+  border-top: 1px solid var(--linha);
+}
+.aviso {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 40px;
+  padding: 10px 16px;
+  font-size: 24px;
+  font-weight: 600;
+  color: #1a1200;
+  background: var(--aviso);
+  border-radius: 12px;
+}
+
+/* Tela de token */
+#login {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--fundo);
+}
+#form-login { display: flex; flex-direction: column; gap: 14px; width: 520px; }
+#form-login label { font-size: 26px; font-weight: 600; }
+#form-login input {
+  height: 56px;
+  padding: 0 14px;
+  font-family: inherit;
+  font-size: 24px;
+  color: var(--texto);
+  background: var(--painel);
+  border: 2px solid var(--linha);
+  border-radius: 12px;
+  outline: none;
+}
+#form-login input:focus, .entrada input:focus { border-color: var(--acento); }

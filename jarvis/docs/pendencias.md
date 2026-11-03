@@ -9,6 +9,10 @@ o uso real no Pi.
   x86_64. Falta confirmar que os wheels de `psutil`, `websockets` e
   `pydantic-core` instalam no Pi sem compilar. Se compilar, o `apt` precisa de
   `python3-dev` e `build-essential`.
+- **Kiosk no Pi.** `deploy/kiosk.sh` e `jarvis-kiosk.service` nunca rodaram num
+  Pi de verdade. No Ubuntu 22.04, `chromium-browser` é pacote snap: validar se
+  ele roda sob o `cage`, ou usar o binário do Debian. Conferir também se as
+  fontes (DejaVu) estão instaladas.
 - **Ler a temperatura real.** Conferir quais zonas existem em
   `/sys/class/thermal/` no Orange Pi e se o `max` entre elas é a leitura que
   interessa. Se não for, filtrar por `type`.
@@ -23,8 +27,11 @@ o uso real no Pi.
 
 ## Funcionalidades que faltam
 
-- **Tela web de verdade.** O `screen/index.html` é só um placeholder. Faltam o
-  layout 800×480, o chat na tela e as telas de notas e agenda.
+- **Tela 800×480: falta ver no display real.** As cinco telas, o mascote e o chat
+  estão prontos e testados no navegador (`tests/e2e_tela.js`, Playwright). Falta
+  conferir no display de 5": legibilidade a ~40 cm, e o kiosk.
+- **Segurar para falar.** A tecla 1 só abre o campo de texto. Gravação, transcrição
+  e resposta em voz não existem ainda.
 - **App Flutter.** Não começado. O contrato está em `jarvis/README.md`
   (`/ws/chat`, `/events` e os endpoints REST).
 - **GPIO.** Ligar os pinos e chamar `backend/entrada.py:registrar_tecla`.
@@ -50,6 +57,11 @@ o uso real no Pi.
 - **Token na query string.** `/events` e `/ws/chat` aceitam `?token=`, e ele
   vai parar no log de acesso do uvicorn (`journalctl -u jarvis`). Para mitigar:
   trocar por um ticket de uso único, ou por cookie definido num login.
+- **Token em `screen/config.js`.** O arquivo é servido sem autenticação pela porta
+  8000, na LAN também. Se o token real for escrito ali, qualquer um na rede o lê.
+  Deixe vazio no git; no Pi, digite o token uma vez na tela (fica no perfil do
+  Chromium). Alternativa melhor: o backend entregar o token pronto só a quem tem
+  o cabeçalho.
 - **Sem rotação do token.** Trocar exige editar o `.env` e reiniciar. Não há
   rotação por tempo.
 - **Teste de carga não feito.** Não sabemos quantos clientes SSE o Pi aguenta
